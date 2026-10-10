@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Metronome, type Click } from '../../lib/metronome';
 import { subscribeNotes } from '../../lib/midiInput';
 import { getMetronomeOffset } from '../../lib/prefs';
-import { DEFAULT_TOLERANCE_MS, Matcher, expectedNotes } from '../../lib/scoring';
+import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, songTimeOf } from '../../lib/scoring';
 import type { PlayedEvent, Run, SongModel } from '../../types';
 
 export type PracticeConfig = {
@@ -13,6 +13,8 @@ export type PracticeConfig = {
   endMeasure: number;
   tempoRate: number;
   metronome: boolean;
+  /** Stop at each note until it is played. */
+  wait: boolean;
 };
 
 type Props = {
@@ -81,24 +83,28 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
     const originTime = rangeStart - countIn;
     const startedAtPerf = performance.now() + LEAD_MS;
     const startedAt = Date.now() + LEAD_MS;
-    const songTimeAt = (perf: number) => originTime + ((perf - startedAtPerf) / 1000) * rate;
+    const matcher = new Matcher(notes, DEFAULT_TOLERANCE_MS, rate, rangeStart);
+    // In wait mode the clock stops at each note until the matcher pairs it.
+    const gate = config.wait ? new WaitGate(notes, matcher, originTime, rate) : null;
+    const songTimeAt = (perf: number) =>
+      gate ? gate.songTime(perf - startedAtPerf) : songTimeOf({ originTime, tempoRate: rate }, perf - startedAtPerf);
     const perfTimeAt = (songTime: number) => startedAtPerf + ((songTime - originTime) / rate) * 1000;
     // Keep going a moment past the last measure so a late final note still counts.
     const stopAt = rangeEnd + tolSec + 0.4 * rate;
 
     // ---- Metronome ----
+    // Clicks are scheduled ahead on a steady clock, so wait mode keeps only the count-in.
     const rangeBeats = song.beats.filter((b) => b.measure >= config.startMeasure && b.measure <= config.endMeasure);
     const countInBeats = rangeBeats.filter((b) => b.measure === config.startMeasure);
     const clicks: Click[] = [
       ...countInBeats.map((b) => ({ perfTime: perfTimeAt(b.time - countIn), downbeat: b.downbeat, countIn: true })),
-      ...rangeBeats.map((b) => ({ perfTime: perfTimeAt(b.time), downbeat: b.downbeat, countIn: false })),
+      ...(gate ? [] : rangeBeats.map((b) => ({ perfTime: perfTimeAt(b.time), downbeat: b.downbeat, countIn: false }))),
     ];
-    const metronome = new Metronome(clicks, config.metronome, getMetronomeOffset());
+    const metronome = new Metronome(clicks, config.metronome && !gate, getMetronomeOffset());
     metronomeRef.current = metronome;
     metronome.start();
 
     // ---- Input and live matching ----
-    const matcher = new Matcher(notes, DEFAULT_TOLERANCE_MS, rate, rangeStart);
     const events: PlayedEvent[] = [];
     const held = new Set<number>();
     const unsubscribe = subscribeNotes((e) => {
@@ -107,14 +113,18 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
       const t = e.timeStamp - startedAtPerf;
       if (t < 0) return;
       events.push({ t, pitch: e.pitch, velocity: e.velocity, on: e.on });
-      if (e.on) matcher.noteOn(songTimeAt(e.timeStamp), e.pitch);
+      if (!e.on) return;
+      matcher.noteOn(songTimeAt(e.timeStamp), e.pitch);
+      gate?.update(t);
     });
 
     let finished = false;
     const finish = (completed: boolean) => {
       if (finished) return;
       finished = true;
-      const reachedTime = songTimeAt(performance.now());
+      const now = performance.now();
+      const reachedTime = songTimeAt(now);
+      gate?.update(now - startedAtPerf, true);
       if (reachedTime <= rangeStart) {
         callbacks.current.onCancel();
         return;
@@ -127,7 +137,8 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
         endMeasure: config.endMeasure,
         tempoRate: rate,
         tracks: config.tracks,
-        metronome: config.metronome,
+        metronome: config.metronome && !gate,
+        ...(gate && { wait: true, holds: gate.holds }),
         toleranceMs: DEFAULT_TOLERANCE_MS,
         originTime,
         reachedTime,
@@ -230,16 +241,29 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
       g.globalAlpha = 1;
       g.restore();
 
+      // While the song waits, mark the keys it is waiting for.
+      const waiting = gate?.waiting(performance.now() - startedAtPerf) ?? false;
+      const wanted = new Map(waiting ? gate!.pending(tolSec).map((n) => [n.pitch, n.track]) : []);
+      const marker = (p: number, keyHeight: number) => {
+        if (!wanted.has(p) || held.has(p)) return;
+        g.fillStyle = trackColor.get(wanted.get(p)!) ?? COLOR.gold;
+        g.beginPath();
+        g.roundRect(keyX(p) + 3, hitY + keyHeight - 18, keyWidth(p) - 6, 12, 2);
+        g.fill();
+      };
+
       // Keys, with the ones being held lit up.
       for (let p = lo; p <= hi; p++) {
         if (isBlack(p)) continue;
         g.fillStyle = held.has(p) ? COLOR.gold : COLOR.snow;
         g.fillRect(keyX(p) + 0.5, hitY, whiteWidth - 1, keysHeight);
+        marker(p, keysHeight);
       }
       for (let p = lo; p <= hi; p++) {
         if (!isBlack(p)) continue;
         g.fillStyle = held.has(p) ? COLOR.flame : COLOR.night;
         g.fillRect(keyX(p), hitY, blackWidth, keysHeight * 0.62);
+        marker(p, keysHeight * 0.62);
       }
       // A felt strip in the sunset stripes along the top of the keys, under the white hit line.
       STRIPES.forEach((stripe, i) => {
@@ -286,7 +310,9 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
       if (positionRef.current) {
         let measure = config.startMeasure;
         while (measure < config.endMeasure && song.measures[measure + 1].start <= songTime) measure++;
-        positionRef.current.textContent = `Measure ${measure + 1} of ${config.startMeasure + 1}–${config.endMeasure + 1}`;
+        positionRef.current.textContent =
+          `Measure ${measure + 1} of ${config.startMeasure + 1}–${config.endMeasure + 1}` +
+          (waiting ? ' · waiting for you' : '');
       }
       if (hitsRef.current) hitsRef.current.textContent = `${matcher.matched.size} hit`;
     };
@@ -313,12 +339,16 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
         <p className="flex flex-wrap gap-x-4 text-sm">
           <span ref={positionRef} className="font-semibold" />
           <span ref={hitsRef} className="font-semibold text-gold" />
-          <span className="text-haze">{Math.round(config.tempoRate * 100)}% tempo</span>
+          <span className="text-haze">
+            {Math.round(config.tempoRate * 100)}% tempo{config.wait ? ' · waits for each note' : ''}
+          </span>
         </p>
         <div className="flex gap-3">
-          <button type="button" className="btn" aria-pressed={metronomeOn} onClick={toggleMetronome}>
-            Metronome {metronomeOn ? 'on' : 'off'}
-          </button>
+          {!config.wait && (
+            <button type="button" className="btn" aria-pressed={metronomeOn} onClick={toggleMetronome}>
+              Metronome {metronomeOn ? 'on' : 'off'}
+            </button>
+          )}
           <button type="button" className="btn btn-primary" onClick={() => endRef.current()}>
             End (Esc)
           </button>

@@ -32,3 +32,10 @@ A played note is a hit if it has the right pitch and lands within 150 ms of the
 written note, measured in real time whatever the tempo. Written notes with no
 match are misses, and played notes with no match are wrong notes. Accuracy is
 hits / (hits + misses + wrong notes). Note lengths are not scored.
+
+### Wait mode
+
+Tick "Wait for each note" to have the music stop at every note until you play
+it, the way you would when learning a new piece. Wrong notes still count, but
+nothing is missed and timing is not scored. The run stores where the music
+stopped and for how long, so it is scored on the same clock you played to.
