@@ -1,0 +1,58 @@
+@import 'tailwindcss';
+
+/* A 70s trail poster screen-printed on black: white lettering, flat sunset stripes, hard edges. */
+@theme {
+  --color-night: #0c0c0d;
+  --color-slate: #1c1b1a;
+  --color-rule: #6b6862;
+  --color-snow: #fbfaf6;
+  --color-haze: #a8a49c;
+  --color-ember: #e0432f;
+  --color-flame: #f07a26;
+  --color-gold: #f9c938;
+
+  --font-display: var(--font-righteous), 'Arial Rounded MT Bold', system-ui, sans-serif;
+  --font-body: var(--font-dm-sans), system-ui, sans-serif;
+
+  --radius-block: 0.125rem;
+}
+
+body {
+  background: var(--color-night);
+  color: var(--color-snow);
+  font-family: var(--font-body);
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+input[type='range'],
+input[type='checkbox'] {
+  accent-color: var(--color-gold);
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-block border-2 border-rule px-4 py-2 font-display text-sm tracking-wider text-snow uppercase transition-colors hover:border-snow hover:bg-snow hover:text-night disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply border-gold bg-gold text-night;
+  }
+
+  /* Framed on the left and top only, like the rule around the poster's stripe block. */
+  .card {
+    @apply rounded-tl-block border-t-2 border-l-2 border-snow p-5;
+  }
+
+  .eyebrow {
+    @apply text-xs font-medium tracking-[0.3em] text-haze uppercase;
+  }
+
+  /* Display type is single-weight rounded caps, set tight. */
+  .title {
+    @apply font-display leading-none tracking-tight break-words uppercase;
+  }
+}

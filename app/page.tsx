@@ -1,0 +1,144 @@
+'use client';
+
+import Link from 'next/link';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { parseMidi } from './lib/midi/parse';
+import { buildSongModel } from './lib/midi/songModel';
+import { store } from './lib/store';
+import { exportBackup, importBackup } from './lib/store/backup';
+import type { SongSummary } from './types';
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong');
+
+export default function LibraryPage() {
+  const [songs, setSongs] = useState<SongSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const midiInput = useRef<HTMLInputElement>(null);
+  const backupInput = useRef<HTMLInputElement>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setSongs(await store.listSongs());
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const addSongs = async (files: FileList | null) => {
+    setError(null);
+    for (const file of files ?? []) {
+      try {
+        const midi = await file.arrayBuffer();
+        buildSongModel(parseMidi(midi)); // reject unreadable files before storing them
+        await store.putSong({
+          id: crypto.randomUUID(),
+          title: file.name.replace(/\.(mid|midi)$/i, ''),
+          midi,
+          addedAt: Date.now(),
+        });
+      } catch (e) {
+        setError(`${file.name}: ${errorText(e)}`);
+      }
+    }
+    await refresh();
+  };
+
+  const removeSong = async (song: SongSummary) => {
+    if (!confirm(`Delete “${song.title}” and all of its practice history?`)) return;
+    await store.deleteSong(song.id);
+    await refresh();
+  };
+
+  const downloadBackup = async () => {
+    const url = URL.createObjectURL(new Blob([await exportBackup(store)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `piano-practice-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const restoreBackup = async (file: File | undefined) => {
+    if (!file) return;
+    setError(null);
+    try {
+      await importBackup(store, await file.text());
+    } catch (e) {
+      setError(errorText(e));
+    }
+    await refresh();
+  };
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="eyebrow">Library</p>
+          <h1 className="title text-4xl sm:text-5xl">Your pieces</h1>
+        </div>
+        <button type="button" className="btn btn-primary" onClick={() => midiInput.current?.click()}>
+          Add MIDI file
+        </button>
+        <input
+          ref={midiInput}
+          type="file"
+          accept=".mid,.midi,audio/midi"
+          multiple
+          hidden
+          onChange={(e) => {
+            void addSongs(e.target.files);
+            e.target.value = '';
+          }}
+        />
+      </div>
+
+      {error && <p className="card border-ember text-sm text-ember">{error}</p>}
+
+      {songs && songs.length === 0 && (
+        <p className="card text-haze">Nothing here yet. Add a MIDI file of a piece you want to learn.</p>
+      )}
+
+      <ul className="space-y-3">
+        {songs?.map((song) => (
+          <li key={song.id} className="card flex items-center justify-between gap-4">
+            <Link href={`/song?id=${song.id}`} className="min-w-0 flex-1 hover:text-gold">
+              <span className="block truncate font-display text-xl uppercase">{song.title}</span>
+              <span className="text-sm text-haze">Added {new Date(song.addedAt).toLocaleDateString()}</span>
+            </Link>
+            <button type="button" className="btn" onClick={() => void removeSong(song)}>
+              Delete
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <section className="space-y-3 border-t border-rule pt-6">
+        <p className="text-sm text-haze">
+          Pieces and practice history are stored in this browser. Clearing site data erases them, so keep a backup.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <button type="button" className="btn" onClick={() => void downloadBackup()}>
+            Download backup
+          </button>
+          <button type="button" className="btn" onClick={() => backupInput.current?.click()}>
+            Restore backup
+          </button>
+          <input
+            ref={backupInput}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(e) => {
+              void restoreBackup(e.target.files?.[0]);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      </section>
+    </div>
+  );
+}
