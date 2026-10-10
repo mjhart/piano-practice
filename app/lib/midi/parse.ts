@@ -74,7 +74,10 @@ export function parseMidi(buffer: ArrayBuffer): MidiFile {
         }
         pos = next;
       } else if (status === 0xf0 || status === 0xf7) {
-        pos += varLen();
+        // Read the length first: `pos += varLen()` would add to the position
+        // from before the length bytes and land short.
+        const length = varLen();
+        pos += length;
       } else {
         const kind = status & 0xf0;
         const channel = status & 0x0f;

@@ -18,6 +18,13 @@ npm run dev
 Open http://localhost:3000 in Chrome, Edge or Firefox (Safari has no Web MIDI),
 plug in a MIDI keyboard and allow MIDI access when asked.
 
+## Adding a piece
+
+Adding a MIDI file opens its setup screen. Tick the parts you will play (they
+are drawn as a piano roll and you can listen to them), set the tempo the piece
+should open at, and drag the edges of the roll to trim off intros, outros or
+empty measures. "Set up" on the library or piece page brings the screen back.
+
 ## Other commands
 
 ```

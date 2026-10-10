@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { parseMidi } from './lib/midi/parse';
 import { buildSongModel } from './lib/midi/songModel';
@@ -11,6 +12,7 @@ import type { SongSummary } from './types';
 const errorText = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong');
 
 export default function LibraryPage() {
+  const router = useRouter();
   const [songs, setSongs] = useState<SongSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const midiInput = useRef<HTMLInputElement>(null);
@@ -28,23 +30,28 @@ export default function LibraryPage() {
     void refresh();
   }, [refresh]);
 
-  const addSongs = async (files: FileList | null) => {
+  const addSongs = async (files: File[]) => {
     setError(null);
-    for (const file of files ?? []) {
+    const added: string[] = [];
+    for (const file of files) {
       try {
         const midi = await file.arrayBuffer();
         buildSongModel(parseMidi(midi)); // reject unreadable files before storing them
+        const id = crypto.randomUUID();
         await store.putSong({
-          id: crypto.randomUUID(),
+          id,
           title: file.name.replace(/\.(mid|midi)$/i, ''),
           midi,
           addedAt: Date.now(),
         });
+        added.push(id);
       } catch (e) {
         setError(`${file.name}: ${errorText(e)}`);
       }
     }
-    await refresh();
+    // One new piece goes straight to its setup; several wait in the library.
+    if (added.length === 1 && files.length === 1) router.push(`/song/setup?id=${added[0]}`);
+    else await refresh();
   };
 
   const removeSong = async (song: SongSummary) => {
@@ -90,7 +97,8 @@ export default function LibraryPage() {
           multiple
           hidden
           onChange={(e) => {
-            void addSongs(e.target.files);
+            // Copy the list: clearing the input below empties the live FileList.
+            void addSongs([...(e.target.files ?? [])]);
             e.target.value = '';
           }}
         />
@@ -108,6 +116,9 @@ export default function LibraryPage() {
             <Link href={`/song?id=${song.id}`} className="min-w-0 flex-1 hover:text-gold">
               <span className="block truncate font-display text-xl uppercase">{song.title}</span>
               <span className="text-sm text-haze">Added {new Date(song.addedAt).toLocaleDateString()}</span>
+            </Link>
+            <Link href={`/song/setup?id=${song.id}`} className="btn">
+              Set up
             </Link>
             <button type="button" className="btn" onClick={() => void removeSong(song)}>
               Delete

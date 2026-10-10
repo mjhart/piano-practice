@@ -7,6 +7,7 @@ import { parseMidi } from '../lib/midi/parse';
 import { buildSongModel } from '../lib/midi/songModel';
 import { getMetronomeOffset, setMetronomeOffset } from '../lib/prefs';
 import { scoreRun } from '../lib/scoring';
+import { MAX_TEMPO_RATE, MIN_TEMPO_RATE, resolveSettings } from '../lib/settings';
 import { store } from '../lib/store';
 import type { Run, SongModel } from '../types';
 import { HeatStrip } from './components/HeatStrip';
@@ -21,7 +22,8 @@ type Mode =
   | { kind: 'playing'; config: PracticeConfig }
   | { kind: 'results'; run: Run };
 
-type Loaded = { title: string; model: SongModel };
+/** `trim` is the part of the piece kept in its settings, as inclusive measure indexes. */
+type Loaded = { title: string; model: SongModel; trim: Range };
 
 export default function SongPage() {
   return (
@@ -54,10 +56,13 @@ function SongView() {
         const model = buildSongModel(parseMidi(song.midi));
         const history = await store.listRuns(id);
         if (cancelled) return;
-        setLoaded({ title: song.title, model });
+        const settings = resolveSettings(model, song.settings);
+        const trim: Range = [settings.firstMeasure, settings.lastMeasure];
+        setLoaded({ title: song.title, model, trim });
         setRuns(history);
-        setTracks(model.tracks.map((t) => t.index));
-        setRange([0, model.measures.length - 1]);
+        setTracks(settings.tracks);
+        setRange(trim);
+        setTempo(Math.round(settings.tempoRate * 100));
         setOffset(getMetronomeOffset());
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load this piece.');
@@ -135,7 +140,8 @@ function SongView() {
     );
   }
 
-  const wholeSong = range[0] === 0 && range[1] === model.measures.length - 1;
+  const { trim } = loaded;
+  const wholeSong = range[0] === trim[0] && range[1] === trim[1];
   const start = () =>
     setMode({
       kind: 'playing',
@@ -144,11 +150,16 @@ function SongView() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="eyebrow">
-          {model.measures.length} measures · {Math.round(model.bpm)} bpm
-        </p>
-        <h1 className="title mt-2 text-4xl sm:text-5xl">{loaded.title}</h1>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <p className="eyebrow">
+            {trim[1] - trim[0] + 1} measures · {Math.round(model.bpm)} bpm
+          </p>
+          <h1 className="title mt-2 text-4xl sm:text-5xl">{loaded.title}</h1>
+        </div>
+        <Link href={`/song/setup?id=${id}`} className="btn">
+          Set up
+        </Link>
       </div>
 
       <section className="card space-y-4">
@@ -157,7 +168,7 @@ function SongView() {
             {wholeSong ? 'Whole piece' : `Measures ${range[0] + 1}–${range[1] + 1}`}
           </h2>
           {!wholeSong && (
-            <button type="button" className="btn" onClick={() => setRange([0, model.measures.length - 1])}>
+            <button type="button" className="btn" onClick={() => setRange(trim)}>
               Select the whole piece
             </button>
           )}
@@ -166,7 +177,7 @@ function SongView() {
           Drag across measures, or shift-click, to practice one section. Colours show how each measure went the last
           time you played it.
         </p>
-        <HeatStrip from={0} to={model.measures.length - 1} values={standing} selection={range} onSelect={setRange} />
+        <HeatStrip from={trim[0]} to={trim[1]} values={standing} selection={range} onSelect={setRange} />
       </section>
 
       <section className="card grid gap-6 sm:grid-cols-3">
@@ -196,9 +207,9 @@ function SongView() {
             <input
               type="range"
               className="w-full"
-              min={30}
-              max={150}
-              step={5}
+              min={MIN_TEMPO_RATE * 100}
+              max={MAX_TEMPO_RATE * 100}
+              step={1}
               value={tempo}
               onChange={(e) => setTempo(Number(e.target.value))}
             />

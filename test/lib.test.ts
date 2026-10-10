@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { parseMidi } from '../app/lib/midi/parse.ts';
 import { buildSongModel } from '../app/lib/midi/songModel.ts';
 import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, scoreRun } from '../app/lib/scoring.ts';
+import { defaultSettings, resolveSettings } from '../app/lib/settings.ts';
 import type { PlayedEvent, Run } from '../app/types.ts';
 
 // Two tracks at 120 bpm in 4/4, 480 ticks per quarter. The second track plays
@@ -37,6 +38,27 @@ function fixture(): ArrayBuffer {
 
 const song = () => buildSongModel(parseMidi(fixture()));
 
+// A format 1 file with a conductor track holding `meta`, then one track per
+// entry in `parts`, each playing quarter notes from the given tick.
+function build(meta: number[], parts: { name: string; channel: number; rest: number[]; notes: number; lead?: number[] }[]) {
+  const text = (s: string) => [...s].map((c) => c.charCodeAt(0));
+  const chunk = (id: string, body: number[]) => [
+    ...text(id),
+    ...[24, 16, 8, 0].map((shift) => (body.length >>> shift) & 0xff),
+    ...body,
+  ];
+  const end = [0x00, 0xff, 0x2f, 0x00];
+  const tracks = parts.map((p) => {
+    const body = [0x00, 0xff, 0x03, p.name.length, ...text(p.name), ...(p.lead ?? [])];
+    for (let i = 0; i < p.notes; i++) {
+      body.push(...(i === 0 ? p.rest : [0x00]), 0x90 | p.channel, 60, 80, 0x83, 0x60, 0x80 | p.channel, 60, 0);
+    }
+    return chunk('MTrk', [...body, ...end]);
+  });
+  const header = chunk('MThd', [0, 1, 0, parts.length + 1, 0x01, 0xe0]);
+  return new Uint8Array([...header, ...chunk('MTrk', [...meta, ...end]), ...tracks.flat()]).buffer;
+}
+
 const run = (overrides: Partial<Run>): Run => ({
   id: 'run',
   songId: 'song',
@@ -62,7 +84,7 @@ const round = (value: unknown): unknown =>
 
 test('builds a song model from a MIDI file', () => {
   const model = song();
-  assert.deepEqual(model.tracks, [{ index: 1, name: 'Right', noteCount: 3 }]);
+  assert.deepEqual(model.tracks, [{ index: 1, name: 'Right', noteCount: 3, percussion: false }]);
   assert.equal(model.bpm, 120);
   assert.deepEqual(model.measures, [
     { index: 0, start: 0, end: 2 },
@@ -181,4 +203,67 @@ test('wait mode records the hold the run ended in', () => {
     run({ wait: true, holds: live.gate.holds, reachedTime: live.reachedTime, completed: false, events: [on(2000, 60)] }),
   );
   assert.deepEqual([score.hits, score.misses, score.extras], [1, 0, 0]);
+});
+
+test('skips system exclusive messages without losing its place', () => {
+  // Synth reset messages like this one sit at the top of many downloaded files.
+  const sysex = [0x00, 0xf0, 0x05, 0x7e, 0x7f, 0x09, 0x01, 0xf7];
+  const model = buildSongModel(parseMidi(build([], [{ name: 'Piano', channel: 0, rest: [0x00], notes: 2, lead: sysex }])));
+  assert.deepEqual(
+    model.notes.map((n) => n.start),
+    [0, 0.5],
+  );
+  assert.equal(model.measures.length, 1);
+});
+
+test('a time signature change partway through a measure starts a new one', () => {
+  // 4/4, then 3/4 from the third beat of the first measure.
+  const meta = [0x00, 0xff, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08, 0x87, 0x40, 0xff, 0x58, 0x04, 0x03, 0x02, 0x18, 0x08];
+  const model = buildSongModel(parseMidi(build(meta, [{ name: 'Piano', channel: 0, rest: [0x00], notes: 5 }])));
+  assert.deepEqual(
+    model.measures.map((m) => [m.start, m.end]),
+    [
+      [0, 1],
+      [1, 2.5],
+    ],
+  );
+  assert.deepEqual(
+    model.beats.map((b) => [b.time, b.downbeat]),
+    [
+      [0, true],
+      [0.5, false],
+      [1, true],
+      [1.5, false],
+      [2, false],
+    ],
+  );
+  assert.deepEqual(
+    model.notes.map((n) => n.measure),
+    [0, 0, 1, 1, 1],
+  );
+});
+
+test('default settings pick the piano part and trim the silence around it', () => {
+  // Drums play from the start; the piano comes in at measure 3 (0x9e 0x00 is 3840 ticks).
+  const model = buildSongModel(
+    parseMidi(
+      build([], [
+        { name: 'Drums', channel: 9, rest: [0x00], notes: 16 },
+        { name: 'Strings', channel: 1, rest: [0x00], notes: 12 },
+        { name: 'A.PIANO 2', channel: 0, rest: [0x9e, 0x00], notes: 4 },
+      ]),
+    ),
+  );
+  assert.deepEqual(
+    model.tracks.map((t) => t.percussion),
+    [true, false, false],
+  );
+  assert.deepEqual(defaultSettings(model), { tracks: [3], tempoRate: 1, firstMeasure: 2, lastMeasure: 2 });
+  // Stored settings are kept, but can't point outside the piece.
+  assert.deepEqual(resolveSettings(model, { tracks: [3, 7], tempoRate: 0.8, firstMeasure: 1, lastMeasure: 99 }), {
+    tracks: [3],
+    tempoRate: 0.8,
+    firstMeasure: 1,
+    lastMeasure: 3,
+  });
 });

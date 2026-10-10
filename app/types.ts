@@ -30,6 +30,8 @@ export type TrackInfo = {
   index: number;
   name: string;
   noteCount: number;
+  /** A drum part: its pitches choose drums, so it can't be played on a piano. */
+  percussion: boolean;
 };
 
 export type SongModel = {
@@ -43,11 +45,27 @@ export type SongModel = {
 
 // ---- Stored records ----
 
+/** How a piece is set up for practice. Chosen once after upload, editable later. */
+export type SongSettings = {
+  /** The parts ticked when the piece is opened. */
+  tracks: number[];
+  /** The tempo the piece opens at. 1 is the file's tempo. */
+  tempoRate: number;
+  /**
+   * Inclusive measure indexes. Measures outside are hidden, but keep their
+   * numbers, so runs recorded before a trim still line up.
+   */
+  firstMeasure: number;
+  lastMeasure: number;
+};
+
 export type Song = {
   id: string;
   title: string;
   midi: ArrayBuffer;
   addedAt: number;
+  /** Missing on pieces added before settings existed; see resolveSettings. */
+  settings?: SongSettings;
 };
 
 export type SongSummary = Omit<Song, 'midi'>;

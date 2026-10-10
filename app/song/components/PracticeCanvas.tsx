@@ -27,7 +27,7 @@ type Props = {
 };
 
 // Canvas can't read Tailwind classes; these mirror the tokens in globals.css.
-const COLOR = {
+export const COLOR = {
   night: '#0c0c0d',
   slate: '#1c1b1a',
   rule: '#6b6862',
@@ -39,7 +39,7 @@ const COLOR = {
 };
 // Parts take the stripe colours. A hit turns solid white and a miss goes hollow,
 // so the three states differ by fill as well as by colour.
-const TRACK_COLORS = [COLOR.gold, COLOR.ember, COLOR.flame, '#f4a98c'];
+export const TRACK_COLORS = [COLOR.gold, COLOR.ember, COLOR.flame, '#f4a98c'];
 const STRIPES = [COLOR.ember, COLOR.flame, COLOR.gold];
 // The ridge under the count-in number, as fractions of its stripe block.
 const RIDGE = [

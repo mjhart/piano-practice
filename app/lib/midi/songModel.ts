@@ -1,7 +1,10 @@
 import type { Beat, Measure, Note, SongModel, TrackInfo } from '../../types';
 import type { MidiFile } from './parse';
 
-type RawNote = { part: number; pitch: number; velocity: number; startTick: number; endTick: number };
+type RawNote = { part: number; channel: number; pitch: number; velocity: number; startTick: number; endTick: number };
+
+// General MIDI keeps channel 10 for drums, where pitches pick the drum.
+const DRUM_CHANNEL = 9;
 
 // Index of the last entry whose key is <= value (0 if none).
 function lastAtOrBefore<T>(items: T[], key: (item: T) => number, value: number): number {
@@ -38,7 +41,7 @@ export function buildSongModel(file: MidiFile): SongModel {
         const part = file.format === 0 ? e.channel : trackIndex;
         const key = e.channel * 128 + e.pitch;
         if (e.type === 'noteOn') {
-          const note = { part, pitch: e.pitch, velocity: e.velocity, startTick: e.tick, endTick: -1 };
+          const note = { part, channel: e.channel, pitch: e.pitch, velocity: e.velocity, startTick: e.tick, endTick: -1 };
           raw.push(note);
           open.set(key, [...(open.get(key) ?? []), note]);
           lastTick = Math.max(lastTick, e.tick + 1);
@@ -83,10 +86,12 @@ export function buildSongModel(file: MidiFile): SongModel {
     }
     const beatTicks = (tpq * 4) / denominator;
     const index = measures.length;
-    for (let k = 0; k < numerator; k++) {
-      beats.push({ time: tickToSec(tick + k * beatTicks), measure: index, downbeat: k === 0 });
+    // A time signature change starts a new measure, even partway through one.
+    const change = nextSig < timeSigs.length ? timeSigs[nextSig].tick : Infinity;
+    const end = Math.min(tick + beatTicks * numerator, change);
+    for (let t = tick; t < end; t += beatTicks) {
+      beats.push({ time: tickToSec(t), measure: index, downbeat: t === tick });
     }
-    const end = tick + beatTicks * numerator;
     measureTicks.push(tick);
     measures.push({ index, start: tickToSec(tick), end: tickToSec(end) });
     tick = end;
@@ -107,13 +112,18 @@ export function buildSongModel(file: MidiFile): SongModel {
   });
 
   const counts = new Map<number, number>();
-  for (const n of notes) counts.set(n.track, (counts.get(n.track) ?? 0) + 1);
+  const pitched = new Set<number>();
+  for (const n of raw) {
+    counts.set(n.part, (counts.get(n.part) ?? 0) + 1);
+    if (n.channel !== DRUM_CHANNEL) pitched.add(n.part);
+  }
   const tracks: TrackInfo[] = [...counts.keys()]
     .sort((a, b) => a - b)
     .map((index) => ({
       index,
       name: file.format === 0 ? `Channel ${index + 1}` : names.get(index) || `Track ${index + 1}`,
       noteCount: counts.get(index) ?? 0,
+      percussion: !pitched.has(index),
     }));
 
   return { notes, beats, measures, tracks, bpm: 60e6 / segments[0].usPerQuarter };
