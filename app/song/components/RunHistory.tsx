@@ -36,6 +36,7 @@ export function RunHistory({ runs, scores, onOpen }: Props) {
               </span>
               <span className="flex-1">
                 Measures {run.startMeasure + 1}–{run.endMeasure + 1} at {Math.round(run.tempoRate * 100)}%
+                {run.wait ? ', waiting for each note' : ''}
                 {run.completed ? '' : ' (ended early)'}
               </span>
               <span className="text-haze">

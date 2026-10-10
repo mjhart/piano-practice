@@ -42,6 +42,7 @@ function SongView() {
   const [range, setRange] = useState<Range>([0, 0]);
   const [tempo, setTempo] = useState(100);
   const [metronome, setMetronome] = useState(true);
+  const [wait, setWait] = useState(false);
   const [offset, setOffset] = useState(0);
 
   useEffect(() => {
@@ -124,6 +125,7 @@ function SongView() {
                 endMeasure: run.endMeasure,
                 tempoRate: run.tempoRate,
                 metronome: run.metronome,
+                wait: !!run.wait,
               },
             })
           }
@@ -137,7 +139,7 @@ function SongView() {
   const start = () =>
     setMode({
       kind: 'playing',
-      config: { tracks, startMeasure: range[0], endMeasure: range[1], tempoRate: tempo / 100, metronome },
+      config: { tracks, startMeasure: range[0], endMeasure: range[1], tempoRate: tempo / 100, metronome, wait },
     });
 
   return (
@@ -185,27 +187,39 @@ function SongView() {
           ))}
         </fieldset>
 
-        <label className="block space-y-2">
-          <span className="eyebrow">Tempo</span>
-          <span className="block font-display text-2xl">
-            {tempo}% <span className="font-body text-base text-haze">{Math.round((model.bpm * tempo) / 100)} bpm</span>
-          </span>
-          <input
-            type="range"
-            className="w-full"
-            min={30}
-            max={150}
-            step={5}
-            value={tempo}
-            onChange={(e) => setTempo(Number(e.target.value))}
-          />
-        </label>
+        <div className="space-y-2">
+          <label className="block space-y-2">
+            <span className="eyebrow">Tempo</span>
+            <span className="block font-display text-2xl">
+              {tempo}% <span className="font-body text-base text-haze">{Math.round((model.bpm * tempo) / 100)} bpm</span>
+            </span>
+            <input
+              type="range"
+              className="w-full"
+              min={30}
+              max={150}
+              step={5}
+              value={tempo}
+              onChange={(e) => setTempo(Number(e.target.value))}
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={wait} onChange={(e) => setWait(e.target.checked)} />
+            Wait for each note
+          </label>
+          <p className="text-xs text-haze">The music stops at every note until you play it.</p>
+        </div>
 
         <div className="space-y-2">
           <p className="eyebrow">Metronome</p>
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={metronome} onChange={(e) => setMetronome(e.target.checked)} />
-            Click on every beat
+            <input
+              type="checkbox"
+              checked={metronome && !wait}
+              disabled={wait}
+              onChange={(e) => setMetronome(e.target.checked)}
+            />
+            Click on every beat{wait ? ' (off while waiting for notes)' : ''}
           </label>
           <label className="flex items-center gap-2 text-sm text-haze">
             Play clicks

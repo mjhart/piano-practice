@@ -1,4 +1,4 @@
-import type { Note, Run, SongModel } from '../types';
+import type { Hold, Note, Run, SongModel } from '../types';
 
 export const DEFAULT_TOLERANCE_MS = 150;
 
@@ -33,8 +33,18 @@ export function expectedNotes(song: SongModel, sel: Selection): Note[] {
   );
 }
 
-export function songTimeOf(run: Pick<Run, 'originTime' | 'tempoRate'>, t: number): number {
-  return run.originTime + (t / 1000) * run.tempoRate;
+type Clock = Pick<Run, 'originTime' | 'tempoRate' | 'holds'>;
+
+/** Song time at t real milliseconds into a run. The clock stands still during holds. */
+export function songTimeOf(run: Clock, t: number): number {
+  let held = 0;
+  for (const hold of run.holds ?? []) {
+    const from = ((hold.at - run.originTime) / run.tempoRate) * 1000 + held;
+    if (t < from) break;
+    if (t < from + hold.ms) return hold.at;
+    held += hold.ms;
+  }
+  return run.originTime + ((t - held) / 1000) * run.tempoRate;
 }
 
 function measureAt(song: SongModel, time: number): number {
@@ -87,6 +97,71 @@ export class Matcher {
       this.extras.push({ time: songTime, pitch });
     }
     return best;
+  }
+}
+
+/**
+ * Wait mode. The song may not pass the earliest expected note that hasn't been
+ * played, so the clock stops there until the Matcher pairs it. The stops are
+ * recorded as holds, which is all scoreRun needs to replay the same clock.
+ */
+export class WaitGate {
+  readonly holds: Hold[] = [];
+  readonly originTime: number;
+  readonly tempoRate: number;
+  private notes: Note[];
+  private matcher: Matcher;
+  private next = 0;
+  /** The song time the clock stops at, or null once every note has been played. */
+  private at: number | null;
+
+  /** notes must be in start order and the same ones the matcher was given. */
+  constructor(notes: Note[], matcher: Matcher, originTime: number, tempoRate: number) {
+    this.notes = notes;
+    this.matcher = matcher;
+    this.originTime = originTime;
+    this.tempoRate = tempoRate;
+    this.at = this.nextStop();
+  }
+
+  /** Song time at t real milliseconds into the run. */
+  songTime(t: number): number {
+    const free = songTimeOf(this, t);
+    return this.at !== null && free > this.at ? this.at : free;
+  }
+
+  /** Whether the clock is stopped at t, waiting for notes. */
+  waiting(t: number): boolean {
+    return this.at !== null && songTimeOf(this, t) > this.at;
+  }
+
+  /** Unplayed notes starting within `window` song seconds of the stop. */
+  pending(window: number): Note[] {
+    const result: Note[] = [];
+    if (this.at === null) return result;
+    for (let i = this.next; i < this.notes.length && this.notes[i].start <= this.at + window; i++) {
+      if (!this.matcher.matched.has(this.notes[i].id)) result.push(this.notes[i]);
+    }
+    return result;
+  }
+
+  /**
+   * Call straight after the matcher sees a note-on at t, and once more when
+   * the run ends. If that released (or ended) a stop, it is recorded as a hold.
+   */
+  update(t: number, ended = false) {
+    const stop = this.at;
+    this.at = this.nextStop();
+    if (stop === null || (stop === this.at && !ended)) return;
+    // The real time the clock reached the stop; before that it wasn't held.
+    const held = this.holds.reduce((sum, h) => sum + h.ms, 0);
+    const from = ((stop - this.originTime) / this.tempoRate) * 1000 + held;
+    if (t > from) this.holds.push({ at: stop, ms: t - from });
+  }
+
+  private nextStop(): number | null {
+    while (this.next < this.notes.length && this.matcher.matched.has(this.notes[this.next].id)) this.next++;
+    return this.next < this.notes.length ? this.notes[this.next].start : null;
   }
 }
 

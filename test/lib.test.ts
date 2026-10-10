@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseMidi } from '../app/lib/midi/parse.ts';
 import { buildSongModel } from '../app/lib/midi/songModel.ts';
-import { scoreRun } from '../app/lib/scoring.ts';
+import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, scoreRun } from '../app/lib/scoring.ts';
 import type { PlayedEvent, Run } from '../app/types.ts';
 
 // Two tracks at 120 bpm in 4/4, 480 ticks per quarter. The second track plays
@@ -135,4 +135,50 @@ test('at half tempo the tolerance stays in real milliseconds and unreached measu
       { measure: 1, hits: 0, misses: 0, extras: 0, accuracy: null, meanAbsErrorMs: null },
     ],
   });
+});
+
+// Plays events through the live wait-mode clock, as the practice canvas does.
+function playWaiting(events: PlayedEvent[], endAt: number, tempoRate = 1) {
+  const model = song();
+  const notes = expectedNotes(model, { tracks: [1], startMeasure: 0, endMeasure: 1 });
+  const originTime = -2 * tempoRate;
+  const matcher = new Matcher(notes, DEFAULT_TOLERANCE_MS, tempoRate, 0);
+  const gate = new WaitGate(notes, matcher, originTime, tempoRate);
+  for (const e of events) {
+    matcher.noteOn(gate.songTime(e.t), e.pitch);
+    gate.update(e.t);
+  }
+  const reachedTime = gate.songTime(endAt);
+  gate.update(endAt, true);
+  return { matcher, gate, reachedTime, originTime };
+}
+
+test('wait mode holds the song at each note until it is played', () => {
+  // C4 on time. The clock reaches E4 at 2500 ms and stands still; a stray D4
+  // is played while waiting, then E4 at 3500 ms releases it. G4 is on time on
+  // the delayed clock.
+  const events = [on(2000, 60), on(3000, 62), on(3500, 64), on(5000, 67)];
+  const live = playWaiting(events, 6000);
+  assert.deepEqual(round(live.gate.holds), [{ at: 0.5, ms: 1000 }]);
+  assert.equal(live.matcher.matched.size, 3);
+  assert.equal(round(live.reachedTime), 3);
+
+  const score = scoreRun(song(), run({ wait: true, holds: live.gate.holds, reachedTime: live.reachedTime, events }));
+  assert.deepEqual(
+    [score.hits, score.misses, score.extras],
+    [live.matcher.matched.size, 0, live.matcher.extras.length],
+  );
+  assert.equal(score.extras, 1);
+});
+
+test('wait mode records the hold the run ended in', () => {
+  // C4 is played, then the player gives up while the song waits on E4.
+  const live = playWaiting([on(2000, 60)], 4000);
+  assert.deepEqual(round(live.gate.holds), [{ at: 0.5, ms: 1500 }]);
+  assert.equal(live.reachedTime, 0.5);
+  const score = scoreRun(
+    song(),
+    run({ wait: true, holds: live.gate.holds, reachedTime: live.reachedTime, completed: false, events: [on(2000, 60)] }),
+  );
+  assert.deepEqual([score.hits, score.misses, score.extras], [1, 0, 0]);
 });

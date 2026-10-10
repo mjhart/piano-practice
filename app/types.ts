@@ -60,6 +60,14 @@ export type PlayedEvent = {
   on: boolean;
 };
 
+/** A place where wait mode stopped the song until the right notes were played. */
+export type Hold = {
+  /** Song time the song stopped at. */
+  at: number;
+  /** Real milliseconds it stayed there. */
+  ms: number;
+};
+
 export type Run = {
   id: string;
   songId: string;
@@ -71,8 +79,15 @@ export type Run = {
   tempoRate: number;
   tracks: number[];
   metronome: boolean;
+  /** Wait mode: the song stopped at each note until it was played. Absent on older runs. */
+  wait?: boolean;
+  /** Where wait mode stopped the song, in order. */
+  holds?: Hold[];
   toleranceMs: number;
-  /** Song time at t = 0, so songTime = originTime + (t / 1000) * tempoRate. */
+  /**
+   * Song time at t = 0, so songTime = originTime + (t / 1000) * tempoRate,
+   * except that the clock stands still during holds.
+   */
   originTime: number;
   /** Song time when the run stopped. */
   reachedTime: number;

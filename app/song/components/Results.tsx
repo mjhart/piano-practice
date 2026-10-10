@@ -45,6 +45,7 @@ export function Results({ run, score, onPractice, onAgain, onBack }: Props) {
   const values: (number | null)[] = [];
   for (const m of score.measures) values[m.measure] = m.accuracy;
 
+  const waitedMs = (run.holds ?? []).reduce((sum, h) => sum + h.ms, 0);
   const drift = score.meanErrorMs;
   const tendency =
     drift === null || Math.abs(drift) < 10 ? 'On the beat' : `${Math.round(Math.abs(drift))} ms ${drift > 0 ? 'late' : 'early'}`;
@@ -54,7 +55,7 @@ export function Results({ run, score, onPractice, onAgain, onBack }: Props) {
       <div>
         <p className="eyebrow">
           {run.completed ? 'Finished' : 'Ended early'} · measures {run.startMeasure + 1}–{run.endMeasure + 1} ·{' '}
-          {Math.round(run.tempoRate * 100)}% tempo
+          {Math.round(run.tempoRate * 100)}% tempo{run.wait ? ' · waited for each note' : ''}
         </p>
         <h1 className="title mt-2 text-7xl text-gold sm:text-8xl">{percent(score.accuracy)}</h1>
       </div>
@@ -63,11 +64,21 @@ export function Results({ run, score, onPractice, onAgain, onBack }: Props) {
         <Stat label="Hit" value={String(score.hits)} />
         <Stat label="Missed" value={String(score.misses)} />
         <Stat label="Wrong notes" value={String(score.extras)} />
-        <Stat
-          label="Typical offset"
-          value={score.meanAbsErrorMs === null ? '–' : `${Math.round(score.meanAbsErrorMs)} ms`}
-        />
-        <Stat label="Tendency" value={tendency} />
+        {run.wait ? (
+          // The clock waited for the player, so timing offsets say little here.
+          <>
+            <Stat label="Stops" value={String(run.holds?.length ?? 0)} />
+            <Stat label="Time waiting" value={`${(waitedMs / 1000).toFixed(1)} s`} />
+          </>
+        ) : (
+          <>
+            <Stat
+              label="Typical offset"
+              value={score.meanAbsErrorMs === null ? '–' : `${Math.round(score.meanAbsErrorMs)} ms`}
+            />
+            <Stat label="Tendency" value={tendency} />
+          </>
+        )}
       </div>
 
       <section className="card space-y-4">
