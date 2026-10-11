@@ -1,18 +1,23 @@
 'use client';
 
 import { useState } from 'react';
-import type { RunScore } from '../../lib/scoring';
+import { scoreByTag, type RunScore } from '../../lib/scoring';
+import { tempoText } from '../../lib/sources';
 import type { Run } from '../../types';
-import { HeatStrip } from './HeatStrip';
+import { HeatStrip, heatColor } from './HeatStrip';
 
 type Range = [number, number];
 
 type Props = {
   run: Run;
   score: RunScore;
-  onPractice: (range: Range) => void;
-  onAgain: () => void;
+  /** Absent when the run played a different exercise from the one now set up. */
+  onPractice?: (range: Range) => void;
+  onAgain?: () => void;
+  /** Sets up the exercise this run played again, for a drill whose settings have since changed. */
+  onRestore?: () => void;
   onBack: () => void;
+  backLabel: string;
 };
 
 export const percent = (value: number | null) => (value === null ? '–' : `${Math.round(value * 100)}%`);
@@ -40,7 +45,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function Results({ run, score, onPractice, onAgain, onBack }: Props) {
+export function Results({ run, score, onPractice, onAgain, onRestore, onBack, backLabel }: Props) {
   const [selection, setSelection] = useState<Range | null>(() => weakestSection(score));
   const values: (number | null)[] = [];
   for (const m of score.measures) values[m.measure] = m.accuracy;
@@ -55,7 +60,8 @@ export function Results({ run, score, onPractice, onAgain, onBack }: Props) {
       <div>
         <p className="eyebrow">
           {run.completed ? 'Finished' : 'Ended early'} · measures {run.startMeasure + 1}–{run.endMeasure + 1} ·{' '}
-          {Math.round(run.tempoRate * 100)}% tempo{run.wait ? ' · waited for each note' : ''}
+          {tempoText(run.source, run.tempoRate)}
+          {run.wait ? ' · waited for each note' : ''}
         </p>
         <h1 className="title mt-2 text-7xl text-gold sm:text-8xl">{percent(score.accuracy)}</h1>
       </div>
@@ -98,19 +104,65 @@ export function Results({ run, score, onPractice, onAgain, onBack }: Props) {
         />
       </section>
 
+      {run.source.kind === 'drill' && <TagScores score={score} tags={run.source.exercise.tags} />}
+
       <div className="flex flex-wrap gap-3">
-        {selection && (
+        {selection && onPractice && (
           <button type="button" className="btn btn-primary" onClick={() => onPractice(selection)}>
             Practice measures {selection[0] + 1}–{selection[1] + 1}
           </button>
         )}
-        <button type="button" className="btn" onClick={onAgain}>
-          Play it again
-        </button>
+        {onAgain && (
+          <button type="button" className="btn" onClick={onAgain}>
+            Play it again
+          </button>
+        )}
+        {onRestore && (
+          <button type="button" className="btn" onClick={onRestore}>
+            Use these settings again
+          </button>
+        )}
         <button type="button" className="btn" onClick={onBack}>
-          Back to the piece
+          {backLabel}
         </button>
       </div>
     </div>
+  );
+}
+
+const TAG_HEADINGS: Record<string, string> = { key: 'By key', chord: 'By chord' };
+
+/** How each key, chord and so on went, for exercises that label their measures. */
+function TagScores({ score, tags }: { score: RunScore; tags: Record<string, string>[] }) {
+  const groups = scoreByTag(score, tags).filter((g) => g.values.length > 1);
+  if (groups.length === 0) return null;
+  return (
+    <section className="card space-y-4">
+      {groups.map(({ tag, values }) => {
+        const scored = values.filter((v) => v.accuracy !== null);
+        const weakest = scored.length ? scored.reduce((a, b) => (b.accuracy! < a.accuracy! ? b : a)) : null;
+        // Only worth naming when something went better than it.
+        const named = weakest && scored.some((v) => v.accuracy! > weakest.accuracy!);
+        return (
+          <div key={tag} className="space-y-2">
+            <h2 className="eyebrow">
+              {TAG_HEADINGS[tag] ?? `By ${tag}`}
+              {named ? ` · weakest ${weakest.value}` : ''}
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {values.map((v) => (
+                <span
+                  key={v.value}
+                  className={`rounded-block px-2 py-1 text-sm font-semibold ${v.accuracy === null ? '' : 'text-night'}`}
+                  style={v.accuracy === null ? undefined : { background: heatColor(v.accuracy) }}
+                >
+                  {v.value} {percent(v.accuracy)}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </section>
   );
 }

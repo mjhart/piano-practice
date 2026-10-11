@@ -1,4 +1,4 @@
-import type { Run, Song, SongSummary, User } from '../../types';
+import type { DrillPreset, Run, Song, SongSummary, User } from '../../types';
 
 /** The name given to the user made when there is none, renamed in the user picker. */
 export const FIRST_USER_NAME = 'Player 1';
@@ -14,7 +14,7 @@ export const FIRST_USER_NAME = 'Player 1';
  * - records are plain data (see app/types.ts)
  * - the store only stores; scoring and aggregation happen in app/lib/scoring.ts
  *
- * Songs are shared by every user; each run belongs to one user.
+ * Songs and drill presets are shared by every user; each run belongs to one user.
  */
 export interface PracticeStore {
   putSong(song: Song): Promise<void>;
@@ -27,7 +27,14 @@ export interface PracticeStore {
   listUsers(): Promise<User[]>;
   /** Also deletes the user's runs. */
   deleteUser(id: string): Promise<void>;
+  putPreset(preset: DrillPreset): Promise<void>;
+  /** Oldest first. */
+  listPresets(drillId: string): Promise<DrillPreset[]>;
+  /** Runs started from it keep its id but are not deleted. */
+  deletePreset(id: string): Promise<void>;
   putRun(run: Run): Promise<void>;
-  /** One user's runs of one song, oldest first. */
-  listRuns(songId: string, userId: string): Promise<Run[]>;
+  /** One user's runs of one song or drill (see app/lib/sources.ts), oldest first. */
+  listRuns(sourceKey: string, userId: string): Promise<Run[]>;
+  /** Every run one user has recorded, oldest first. */
+  listUserRuns(userId: string): Promise<Run[]>;
 }

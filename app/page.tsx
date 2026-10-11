@@ -6,16 +6,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { parseMidi } from './lib/midi/parse';
 import { buildSongModel } from './lib/midi/songModel';
 import { store } from './lib/store';
+import { drills } from './lib/drills/registry';
 import { exportBackup, importBackup } from './lib/store/backup';
 import { getCurrentUserId } from './lib/prefs';
 import { reloadUsers } from './lib/users';
-import type { SongSummary } from './types';
+import type { DrillPreset, SongSummary } from './types';
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong');
 
 export default function LibraryPage() {
   const router = useRouter();
   const [songs, setSongs] = useState<SongSummary[] | null>(null);
+  const [saved, setSaved] = useState<DrillPreset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const midiInput = useRef<HTMLInputElement>(null);
   const backupInput = useRef<HTMLInputElement>(null);
@@ -23,6 +25,7 @@ export default function LibraryPage() {
   const refresh = useCallback(async () => {
     try {
       setSongs(await store.listSongs());
+      setSaved((await Promise.all(drills.map((d) => store.listPresets(d.id)))).flat());
     } catch (e) {
       setError(errorText(e));
     }
@@ -132,9 +135,30 @@ export default function LibraryPage() {
         ))}
       </ul>
 
+      <section className="space-y-3">
+        <h2 className="title text-3xl">Drills</h2>
+        <ul className="space-y-3">
+          {drills.map((drill) => (
+            <li key={drill.id} className="card space-y-3">
+              <Link href={`/drill?id=${drill.id}`} className="block hover:text-gold">
+                <span className="block font-display text-xl uppercase">{drill.name}</span>
+                <span className="text-sm text-haze">{drill.description}</span>
+              </Link>
+              <div className="flex flex-wrap gap-2">
+                {[...drill.presets, ...saved.filter((p) => p.drillId === drill.id)].map((preset) => (
+                  <Link key={preset.id} href={`/drill?id=${drill.id}&preset=${preset.id}`} className="btn">
+                    {preset.name}
+                  </Link>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
       <section className="space-y-3 border-t border-rule pt-6">
         <p className="text-sm text-haze">
-          Pieces, players and practice history are stored in this browser. Clearing site data erases them, so keep a backup.
+          Pieces, players, saved drill settings and practice history are stored in this browser. Clearing site data erases them, so keep a backup.
         </p>
         <div className="flex flex-wrap gap-3">
           <button type="button" className="btn" onClick={() => void downloadBackup()}>

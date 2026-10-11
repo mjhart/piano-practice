@@ -41,14 +41,27 @@ npm run lint
 npm run build   # static site in out/
 ```
 
+## Drills
+
+Besides uploaded pieces, the library lists built-in drills. A drill makes its
+exercise from settings chosen on its page (the chord progression drill takes
+keys, progressions, major or minor, triads or sevenths, voicing and a right-hand
+pattern), and each comes with a few presets. "Save these settings" adds your
+own preset, shared by every player like pieces are. Drills play and score
+exactly like pieces, measures are labelled with their key and chord, and results
+show how each key and chord went. Every run is in the player's history for that
+drill, whatever settings it used.
+
+To add a drill, write a file in `app/lib/drills/` exporting a `DrillDefinition`
+and add it to the list in `app/lib/drills/registry.ts`. `npm test` checks that
+every preset of every drill generates a consistent exercise.
+
 ## Writing MIDI files
 
 `app/lib/midi/write.ts` writes Standard MIDI Files from the same events the
-parser reads, so drills can be generated in code. `npm run chord-drill` writes
-`sample-midis/chord-drill.mid` (or the path after `--`): I-IV-V-I and ii-V-I-I
-in C, G, F, D and Bb, one chord per measure, triads in the right hand and roots
-in the left. Edit the constants at the top of `scripts/chord-drill.ts` to
-change keys, progressions or tempo.
+parser reads. `npm run chord-drill` exports a chord progression drill preset as
+`sample-midis/chord-drill.mid` (or `npm run chord-drill -- out.mid [preset-id [bpm]]`),
+by default I-IV-V-I and ii-V-I-I in C, G, F, D and Bb at 80 bpm.
 
 ## How scoring works
 
