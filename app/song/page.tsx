@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { heatColor } from './components/HeatStrip';
 import { parseMidi } from '../lib/midi/parse';
 import { buildSongModel } from '../lib/midi/songModel';
@@ -10,6 +10,7 @@ import { getMetronomeOffset, setMetronomeOffset } from '../lib/prefs';
 import { scoreRun } from '../lib/scoring';
 import { MAX_TEMPO_RATE, MIN_TEMPO_RATE, resolveSettings } from '../lib/settings';
 import { store } from '../lib/store';
+import { useUsers } from '../lib/users';
 import type { Run, SongModel } from '../types';
 import { HeatStrip } from './components/HeatStrip';
 import { PracticeCanvas, type PracticeConfig } from './components/PracticeCanvas';
@@ -20,7 +21,8 @@ type Range = [number, number];
 
 type Mode =
   | { kind: 'setup' }
-  | { kind: 'playing'; config: PracticeConfig }
+  /** `userId` is who started playing, so switching player mid-run doesn't move the run. */
+  | { kind: 'playing'; config: PracticeConfig; userId: string }
   /** `passes` holds every pass of a loop, oldest first, when there was more than one. */
   | { kind: 'results'; run: Run; passes?: Run[] };
 
@@ -50,6 +52,11 @@ function SongView() {
   const [loop, setLoop] = useState(false);
   const [offset, setOffset] = useState(0);
 
+  const users = useUsers();
+  const userId = users.state === 'ready' ? users.current.id : null;
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId;
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -57,12 +64,10 @@ function SongView() {
         const song = await store.getSong(id);
         if (!song) throw new Error('This piece is not in your library.');
         const model = buildSongModel(parseMidi(song.midi));
-        const history = await store.listRuns(id);
         if (cancelled) return;
         const settings = resolveSettings(model, song.settings);
         const trim: Range = [settings.firstMeasure, settings.lastMeasure];
         setLoaded({ title: song.title, model, trim });
-        setRuns(history);
         setTracks(settings.tracks);
         setRange(trim);
         setTempo(Math.round(settings.tempoRate * 100));
@@ -75,6 +80,21 @@ function SongView() {
       cancelled = true;
     };
   }, [id]);
+
+  // Each player sees only their own history.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    setRuns([]);
+    setMode((mode) => (mode.kind === 'playing' ? mode : { kind: 'setup' }));
+    store.listRuns(id, userId).then(
+      (history) => !cancelled && setRuns(history),
+      () => !cancelled && setError('Practice history could not be loaded.'),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [id, userId]);
 
   const model = loaded?.model;
   const scores = useMemo(() => (model ? runs.map((run) => scoreRun(model, run)) : []), [model, runs]);
@@ -90,7 +110,7 @@ function SongView() {
 
   // Each pass of a loop is saved as it ends, so stopping or leaving never loses the ones before.
   const onRun = useCallback((run: Run) => {
-    setRuns((previous) => [...previous, run]);
+    if (run.userId === userIdRef.current) setRuns((previous) => [...previous, run]);
     store.putRun(run).catch(() => setError('This run could not be saved. Storage may be full or blocked.'));
   }, []);
   const onEnd = useCallback((recorded: Run[]) => {
@@ -98,20 +118,22 @@ function SongView() {
     setMode(run ? { kind: 'results', run, ...(recorded.length > 1 && { passes: recorded }) } : { kind: 'setup' });
   }, []);
 
-  if (error && !model) {
+  if (users.state === 'error' || (error && !model)) {
     return (
       <div className="space-y-4">
-        <p className="card border-ember text-ember">{error}</p>
+        <p className="card border-ember text-ember">{users.state === 'error' ? users.message : error}</p>
         <Link href="/" className="btn">
           Back to the library
         </Link>
       </div>
     );
   }
-  if (!model || !loaded) return <p className="text-haze">Loading…</p>;
+  if (!model || !loaded || !userId) return <p className="text-haze">Loading…</p>;
 
   if (mode.kind === 'playing') {
-    return <PracticeCanvas song={model} songId={id} config={mode.config} onRun={onRun} onEnd={onEnd} />;
+    return (
+      <PracticeCanvas song={model} songId={id} userId={mode.userId} config={mode.config} onRun={onRun} onEnd={onEnd} />
+    );
   }
 
   if (mode.kind === 'results') {
@@ -157,6 +179,7 @@ function SongView() {
           onAgain={() =>
             setMode({
               kind: 'playing',
+              userId,
               config: {
                 tracks: run.tracks,
                 startMeasure: run.startMeasure,
@@ -179,6 +202,7 @@ function SongView() {
   const start = () =>
     setMode({
       kind: 'playing',
+      userId,
       config: { tracks, startMeasure: range[0], endMeasure: range[1], tempoRate: tempo / 100, metronome, wait, loop },
     });
 

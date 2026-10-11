@@ -18,6 +18,9 @@ Next.js 15 static export (no server). See README.md for what it does.
 - `app/lib/store/`: `PracticeStore` is the only way to read or write practice
   data. `IndexedDbStore` is the one implementation, chosen in `index.ts`. A
   backend would be a second implementation of the same interface.
+- `app/lib/users.ts`: the user list and current user, shared by every page.
+  Songs are shared; each `Run` has a `userId`. Which user is current is a
+  per-device pref (`app/lib/prefs.ts`). `UserPicker` in the header switches.
 - `app/lib/settings.ts`: `SongSettings` (default parts, default tempo, trim)
   are stored on the `Song`. `resolveSettings` supplies a guess when a piece has
   none and clamps stored ones to the model.

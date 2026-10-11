@@ -22,6 +22,8 @@ export type PracticeConfig = {
 type Props = {
   song: SongModel;
   songId: string;
+  /** Who is playing; every run recorded belongs to them. */
+  userId: string;
   config: PracticeConfig;
   /** A run was recorded: the whole section, or one pass of a loop. */
   onRun: (run: Run) => void;
@@ -57,7 +59,7 @@ const LEAD_MS = 300;
 
 const isBlack = (pitch: number) => [1, 3, 6, 8, 10].includes(pitch % 12);
 
-export function PracticeCanvas({ song, songId, config, onRun, onEnd }: Props) {
+export function PracticeCanvas({ song, songId, userId, config, onRun, onEnd }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const positionRef = useRef<HTMLSpanElement>(null);
   const hitsRef = useRef<HTMLSpanElement>(null);
@@ -169,6 +171,7 @@ export function PracticeCanvas({ song, songId, config, onRun, onEnd }: Props) {
       const run: Run = {
         id: crypto.randomUUID(),
         songId,
+        userId,
         startedAt: pass.startedAt,
         startMeasure: config.startMeasure,
         endMeasure: config.endMeasure,
@@ -439,7 +442,7 @@ export function PracticeCanvas({ song, songId, config, onRun, onEnd }: Props) {
       unsubscribe();
       metronome.stop();
     };
-  }, [song, songId, config]);
+  }, [song, songId, userId, config]);
 
   const toggleMetronome = () => {
     const next = !metronomeOn;

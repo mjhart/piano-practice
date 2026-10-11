@@ -7,6 +7,8 @@ import { parseMidi } from './lib/midi/parse';
 import { buildSongModel } from './lib/midi/songModel';
 import { store } from './lib/store';
 import { exportBackup, importBackup } from './lib/store/backup';
+import { getCurrentUserId } from './lib/prefs';
+import { reloadUsers } from './lib/users';
 import type { SongSummary } from './types';
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong');
@@ -55,7 +57,7 @@ export default function LibraryPage() {
   };
 
   const removeSong = async (song: SongSummary) => {
-    if (!confirm(`Delete “${song.title}” and all of its practice history?`)) return;
+    if (!confirm(`Delete “${song.title}” and every player's practice history of it?`)) return;
     await store.deleteSong(song.id);
     await refresh();
   };
@@ -73,11 +75,14 @@ export default function LibraryPage() {
     if (!file) return;
     setError(null);
     try {
-      await importBackup(store, await file.text());
+      // An old backup has no players; its history goes to whoever is playing now.
+      const userId = getCurrentUserId();
+      if (!userId) throw new Error('Choose a player first');
+      await importBackup(store, await file.text(), userId);
     } catch (e) {
       setError(errorText(e));
     }
-    await refresh();
+    await Promise.all([refresh(), reloadUsers()]);
   };
 
   return (
@@ -129,7 +134,7 @@ export default function LibraryPage() {
 
       <section className="space-y-3 border-t border-rule pt-6">
         <p className="text-sm text-haze">
-          Pieces and practice history are stored in this browser. Clearing site data erases them, so keep a backup.
+          Pieces, players and practice history are stored in this browser. Clearing site data erases them, so keep a backup.
         </p>
         <div className="flex flex-wrap gap-3">
           <button type="button" className="btn" onClick={() => void downloadBackup()}>
