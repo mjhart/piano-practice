@@ -3,7 +3,13 @@ import { test } from 'node:test';
 import { parseMidi } from '../app/lib/midi/parse.ts';
 import { buildSongModel } from '../app/lib/midi/songModel.ts';
 import { noteEvents, writeMidi } from '../app/lib/midi/write.ts';
-import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, scoreRun } from '../app/lib/scoring.ts';
+import { chordProgressions } from '../app/lib/drills/chordProgressions.ts';
+import { resolveConfig } from '../app/lib/drills/fields.ts';
+import { seededRng } from '../app/lib/drills/random.ts';
+import { drills } from '../app/lib/drills/registry.ts';
+import { KEY_NAMES, diatonicChord, numeral, parseNumerals } from '../app/lib/drills/theory.ts';
+import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, scoreByTag, scoreRun } from '../app/lib/scoring.ts';
+import { upgradeRun } from '../app/lib/sources.ts';
 import { defaultSettings, resolveSettings } from '../app/lib/settings.ts';
 import type { PlayedEvent, Run } from '../app/types.ts';
 
@@ -62,7 +68,8 @@ function build(meta: number[], parts: { name: string; channel: number; rest: num
 
 const run = (overrides: Partial<Run>): Run => ({
   id: 'run',
-  songId: 'song',
+  source: { kind: 'song', songId: 'song' },
+  sourceKey: 'song:song',
   userId: 'user',
   startedAt: 0,
   startMeasure: 0,
@@ -314,4 +321,71 @@ test('writeMidi output reads back as the same events', () => {
   ]);
   const model = buildSongModel(file);
   assert.equal(model.notes.length, 3);
+});
+
+test('scoreByTag totals each measure label', () => {
+  const score = scoreRun(song(), run({ events: [on(2000, 60), on(2500, 64)] }));
+  const groups = scoreByTag(score, [{ key: 'C major' }, { key: 'C major' }]);
+  assert.deepEqual(groups, [{ tag: 'key', values: [{ value: 'C major', hits: 2, misses: 1, extras: 0, accuracy: 2 / 3 }] }]);
+});
+
+test('upgradeRun turns a run that named a song into one with a source', () => {
+  const { source, sourceKey, ...rest } = run({});
+  const upgraded = upgradeRun({ ...rest, songId: 'abc' });
+  assert.deepEqual(upgraded.source, { kind: 'song', songId: 'abc' });
+  assert.equal(upgraded.sourceKey, 'song:abc');
+  assert.equal('songId' in upgraded, false);
+  assert.deepEqual(upgradeRun({ ...rest, source, sourceKey }), run({}));
+});
+
+test('resolveConfig falls back to defaults and keeps the order keys were picked in', () => {
+  const resolved = resolveConfig(chordProgressions, { keys: ['F', 'nope', 'C', 'F'], size: 'ninths', custom: 4 });
+  assert.deepEqual(resolved.keys, ['F', 'C']);
+  assert.equal(resolved.size, 'triads');
+  assert.equal(resolved.custom, '');
+  assert.deepEqual(resolveConfig(chordProgressions, { keys: [] }).keys, chordProgressions.defaults.keys);
+});
+
+test('every built-in preset of every drill generates a consistent exercise', () => {
+  for (const drill of drills) {
+    for (const preset of drill.presets) {
+      const config = resolveConfig(drill, preset.config);
+      const exercise = drill.generate(config, seededRng(7));
+      const label = `${drill.id}/${preset.id}`;
+      assert.ok(exercise.notes.length > 0, label);
+      assert.equal(exercise.tags.length, exercise.measures.length, label);
+      const tracks = new Set(exercise.tracks.map((t) => t.index));
+      for (const n of exercise.notes) {
+        assert.ok(tracks.has(n.track), label);
+        const m = exercise.measures[n.measure];
+        assert.ok(n.start >= m.start && n.start < m.end, label);
+      }
+      assert.deepEqual(drill.generate(config, seededRng(7)), exercise, `${label} is not repeatable`);
+      assert.ok(drill.summary(config), label);
+    }
+  }
+});
+
+test('the chord drill voices its first chords as the old script did', () => {
+  const exercise = chordProgressions.generate(resolveConfig(chordProgressions, chordProgressions.presets[0].config), seededRng(1));
+  const measure = (i: number) => exercise.notes.filter((n) => n.measure === i).map((n) => n.pitch);
+  assert.deepEqual(measure(0), [48, 60, 64, 67]); // C: root in the left hand, C E G
+  assert.deepEqual(measure(1), [41, 60, 65, 69]); // F, the nearest inversion
+  assert.deepEqual(exercise.tags[4], { key: 'C major', chord: 'ii' });
+  assert.equal(exercise.measures.length, 40);
+});
+
+test('minor keys raise the leading tone on V, and sevenths are named', () => {
+  assert.deepEqual(diatonicChord(9, 'minor', 5, 3), [4, 8, 11]); // E major in A minor
+  assert.equal(numeral(5, diatonicChord(9, 'minor', 5, 3)), 'V');
+  assert.equal(numeral(2, diatonicChord(0, 'major', 2, 4)), 'ii7');
+  assert.equal(numeral(7, diatonicChord(0, 'major', 7, 4)), 'viiø7');
+  assert.deepEqual(parseNumerals('I – vi, ii7 V x'), [1, 6, 2, 5]);
+});
+
+test('random key order changes with the seed but not without it', () => {
+  const config = resolveConfig(chordProgressions, { keys: [...KEY_NAMES], order: 'random', progressions: ['ii-V-I'] });
+  const keys = (seed: number) => chordProgressions.generate(config, seededRng(seed)).tags.map((t) => t.key).join();
+  assert.equal(keys(1), keys(1));
+  assert.notEqual(keys(1), keys(2));
 });

@@ -1,5 +1,5 @@
-// Plain, JSON-shaped data shared across the app. Song, User and Run are what
-// the store persists; if a backend is added later these become the wire types.
+// Plain, JSON-shaped data shared across the app. Song, User, DrillPreset and
+// Run are what the store persists; if a backend is added later these become the wire types.
 
 // ---- Song model: derived from the MIDI file, never stored ----
 
@@ -41,6 +41,16 @@ export type SongModel = {
   tracks: TrackInfo[];
   /** Tempo at the start of the file. */
   bpm: number;
+};
+
+/**
+ * What a drill generates: a song model like the one a MIDI file becomes, plus
+ * labels for each measure (for example { key: 'Bb major', chord: 'ii' }) that
+ * results can group by.
+ */
+export type Exercise = SongModel & {
+  /** One entry per measure, by measure index. */
+  tags: Record<string, string>[];
 };
 
 // ---- Stored records ----
@@ -93,9 +103,42 @@ export type Hold = {
   ms: number;
 };
 
+/** A drill's settings, as plain values a settings form can edit. */
+export type DrillConfig = Record<string, string | number | boolean | string[]>;
+
+/** Named drill settings. Shared by every user, like songs. */
+export type DrillPreset = {
+  id: string;
+  drillId: string;
+  name: string;
+  config: DrillConfig;
+  addedAt: number;
+};
+
+/** What a run played: an uploaded piece, or an exercise a drill generated. */
+export type RunSource =
+  | { kind: 'song'; songId: string }
+  | {
+      kind: 'drill';
+      drillId: string;
+      /** The drill's version when it generated the exercise. */
+      drillVersion: number;
+      /** The preset it started from, if any. The settings may have been changed since. */
+      presetId?: string;
+      config: DrillConfig;
+      seed: number;
+      /**
+       * The exercise as generated, so the run can be scored even after the
+       * drill's code changes. Played events are matched against this.
+       */
+      exercise: Exercise;
+    };
+
 export type Run = {
   id: string;
-  songId: string;
+  source: RunSource;
+  /** 'song:<id>' or 'drill:<drillId>' (see app/lib/sources.ts), indexed for history. */
+  sourceKey: string;
   /** Who played it. Runs recorded before there were users belong to the first user. */
   userId: string;
   startedAt: number;

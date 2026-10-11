@@ -1,8 +1,9 @@
-import type { Run, Song, SongSummary, User } from '../../types';
+import type { DrillPreset, Run, Song, SongSummary, User } from '../../types';
+import { songKey, upgradeRun, type StoredRun } from '../sources';
 import { FIRST_USER_NAME, type PracticeStore } from './store';
 
 const DB_NAME = 'piano-practice';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 function result<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -32,18 +33,29 @@ export class IndexedDbStore implements PracticeStore {
           db.createObjectStore('songs', { keyPath: 'id' });
           db.createObjectStore('runs', { keyPath: 'id' }).createIndex('songId', 'songId');
         }
+        // Runs are rewritten in one pass at the end, since two cursors over the
+        // same store would each write back a copy the other had not changed.
+        let firstUser: User | null = null;
         if (e.oldVersion < 2) {
           // Users arrive. Whoever practised before becomes the first user and
           // keeps every run already recorded.
-          const user: User = { id: crypto.randomUUID(), name: FIRST_USER_NAME, addedAt: Date.now() };
-          db.createObjectStore('users', { keyPath: 'id' }).put(user);
+          firstUser = { id: crypto.randomUUID(), name: FIRST_USER_NAME, addedAt: Date.now() };
+          db.createObjectStore('users', { keyPath: 'id' }).put(firstUser);
+          tx.objectStore('runs').createIndex('userId', 'userId');
+        }
+        if (e.oldVersion < 3) {
+          // Drills arrive. A run names its source, song or drill, instead of a song.
+          db.createObjectStore('presets', { keyPath: 'id' }).createIndex('drillId', 'drillId');
           const runs = tx.objectStore('runs');
-          runs.createIndex('userId', 'userId');
-          runs.createIndex('songUser', ['songId', 'userId']);
+          runs.deleteIndex('songId');
+          if (runs.indexNames.contains('songUser')) runs.deleteIndex('songUser');
+          runs.createIndex('sourceKey', 'sourceKey');
+          runs.createIndex('sourceUser', ['sourceKey', 'userId']);
           runs.openCursor().onsuccess = (event) => {
             const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
             if (!cursor) return;
-            cursor.update({ ...cursor.value, userId: user.id });
+            const run = cursor.value as StoredRun;
+            cursor.update(upgradeRun(firstUser ? { ...run, userId: firstUser.id } : run));
             cursor.continue();
           };
         }
@@ -78,7 +90,7 @@ export class IndexedDbStore implements PracticeStore {
     const tx = (await this.open()).transaction(['songs', 'runs'], 'readwrite');
     tx.objectStore('songs').delete(id);
     const runs = tx.objectStore('runs');
-    for (const key of await result(runs.index('songId').getAllKeys(id))) runs.delete(key);
+    for (const key of await result(runs.index('sourceKey').getAllKeys(songKey(id)))) runs.delete(key);
     await done(tx);
   }
 
@@ -102,15 +114,39 @@ export class IndexedDbStore implements PracticeStore {
     await done(tx);
   }
 
+  async putPreset(preset: DrillPreset): Promise<void> {
+    const tx = (await this.open()).transaction('presets', 'readwrite');
+    tx.objectStore('presets').put(preset);
+    await done(tx);
+  }
+
+  async listPresets(drillId: string): Promise<DrillPreset[]> {
+    const tx = (await this.open()).transaction('presets');
+    const presets: DrillPreset[] = await result(tx.objectStore('presets').index('drillId').getAll(drillId));
+    return presets.sort((a, b) => a.addedAt - b.addedAt);
+  }
+
+  async deletePreset(id: string): Promise<void> {
+    const tx = (await this.open()).transaction('presets', 'readwrite');
+    tx.objectStore('presets').delete(id);
+    await done(tx);
+  }
+
   async putRun(run: Run): Promise<void> {
     const tx = (await this.open()).transaction('runs', 'readwrite');
     tx.objectStore('runs').put(run);
     await done(tx);
   }
 
-  async listRuns(songId: string, userId: string): Promise<Run[]> {
+  async listRuns(sourceKey: string, userId: string): Promise<Run[]> {
     const tx = (await this.open()).transaction('runs');
-    const runs: Run[] = await result(tx.objectStore('runs').index('songUser').getAll([songId, userId]));
+    const runs: Run[] = await result(tx.objectStore('runs').index('sourceUser').getAll([sourceKey, userId]));
+    return runs.sort((a, b) => a.startedAt - b.startedAt);
+  }
+
+  async listUserRuns(userId: string): Promise<Run[]> {
+    const tx = (await this.open()).transaction('runs');
+    const runs: Run[] = await result(tx.objectStore('runs').index('userId').getAll(userId));
     return runs.sort((a, b) => a.startedAt - b.startedAt);
   }
 }

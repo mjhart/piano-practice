@@ -5,7 +5,8 @@ import { Metronome, type Click } from '../../lib/metronome';
 import { subscribeNotes } from '../../lib/midiInput';
 import { getMetronomeOffset } from '../../lib/prefs';
 import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, songTimeOf } from '../../lib/scoring';
-import type { PlayedEvent, Run, SongModel } from '../../types';
+import { sourceKeyOf, tempoText } from '../../lib/sources';
+import type { Exercise, PlayedEvent, Run, RunSource, SongModel } from '../../types';
 
 export type PracticeConfig = {
   tracks: number[];
@@ -21,7 +22,8 @@ export type PracticeConfig = {
 
 type Props = {
   song: SongModel;
-  songId: string;
+  /** What is being played, recorded on every run. For a drill, `song` is its exercise. */
+  source: RunSource;
   /** Who is playing; every run recorded belongs to them. */
   userId: string;
   config: PracticeConfig;
@@ -59,7 +61,7 @@ const LEAD_MS = 300;
 
 const isBlack = (pitch: number) => [1, 3, 6, 8, 10].includes(pitch % 12);
 
-export function PracticeCanvas({ song, songId, userId, config, onRun, onEnd }: Props) {
+export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const positionRef = useRef<HTMLSpanElement>(null);
   const hitsRef = useRef<HTMLSpanElement>(null);
@@ -170,7 +172,8 @@ export function PracticeCanvas({ song, songId, userId, config, onRun, onEnd }: P
       if (reachedTime <= rangeStart) return;
       const run: Run = {
         id: crypto.randomUUID(),
-        songId,
+        source,
+        sourceKey: sourceKeyOf(source),
         userId,
         startedAt: pass.startedAt,
         startMeasure: config.startMeasure,
@@ -265,6 +268,10 @@ export function PracticeCanvas({ song, songId, userId, config, onRun, onEnd }: P
       // A black key is positioned by the white key to its left.
       whiteIndex.set(p, isBlack(p) ? whiteCount - 1 : whiteCount++);
     }
+    // A drill labels its measures, such as "B♭ major · ii"; they go beside the measure number.
+    const tags = (song as Partial<Exercise>).tags;
+    const measureLabel = (measure: number) =>
+      [String(measure + 1), ...Object.values(tags?.[measure] ?? {})].join(' · ');
     const trackColor = new Map(song.tracks.map((t, i) => [t.index, TRACK_COLORS[i % TRACK_COLORS.length]]));
 
     // Canvas text can't use CSS variables either, so read the loaded font names once.
@@ -324,7 +331,7 @@ export function PracticeCanvas({ song, songId, userId, config, onRun, onEnd }: P
           g.fillRect(0, y(time), width, beat.downbeat ? 2 : 1);
           if (beat.downbeat) {
             g.fillStyle = COLOR.haze;
-            g.fillText(String(beat.measure + 1), 6, y(time) - 5);
+            g.fillText(measureLabel(beat.measure), 6, y(time) - 5);
           }
         }
       }
@@ -442,7 +449,7 @@ export function PracticeCanvas({ song, songId, userId, config, onRun, onEnd }: P
       unsubscribe();
       metronome.stop();
     };
-  }, [song, songId, userId, config]);
+  }, [song, source, userId, config]);
 
   const toggleMetronome = () => {
     const next = !metronomeOn;
@@ -457,7 +464,8 @@ export function PracticeCanvas({ song, songId, userId, config, onRun, onEnd }: P
           <span ref={positionRef} className="font-semibold" />
           <span ref={hitsRef} className="font-semibold text-gold" />
           <span className="text-haze">
-            {Math.round(config.tempoRate * 100)}% tempo{config.wait ? ' · waits for each note' : ''}
+            {tempoText(source, config.tempoRate)}
+            {config.wait ? ' · waits for each note' : ''}
             {config.loop ? ' · looping' : ''}
           </span>
         </p>

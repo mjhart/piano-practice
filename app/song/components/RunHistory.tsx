@@ -1,6 +1,7 @@
 'use client';
 
 import type { RunScore } from '../../lib/scoring';
+import { tempoText } from '../../lib/sources';
 import type { Run } from '../../types';
 import { heatColor } from './HeatStrip';
 import { percent } from './Results';
@@ -10,9 +11,11 @@ type Props = {
   runs: Run[];
   scores: RunScore[];
   onOpen: (run: Run) => void;
+  /** Says what was played, for a history that mixes different exercises. */
+  describe?: (run: Run) => string;
 };
 
-export function RunHistory({ runs, scores, onOpen }: Props) {
+export function RunHistory({ runs, scores, onOpen, describe }: Props) {
   if (runs.length === 0) return <p className="text-sm text-haze">No practice runs yet.</p>;
   return (
     <ul className="divide-y divide-rule">
@@ -35,7 +38,8 @@ export function RunHistory({ runs, scores, onOpen }: Props) {
                 {percent(score.accuracy)}
               </span>
               <span className="flex-1">
-                Measures {run.startMeasure + 1}–{run.endMeasure + 1} at {Math.round(run.tempoRate * 100)}%
+                {describe ? `${describe(run)}, measures` : 'Measures'} {run.startMeasure + 1}–{run.endMeasure + 1} at{' '}
+                {tempoText(run.source, run.tempoRate).replace(' tempo', '')}
                 {run.wait ? ', waiting for each note' : ''}
                 {run.pass ? `, loop pass ${run.pass}` : ''}
                 {run.completed ? '' : ' (ended early)'}

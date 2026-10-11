@@ -237,3 +237,28 @@ export function scoreRun(song: SongModel, run: Run): RunScore {
     measures,
   };
 }
+
+export type TagValueScore = { value: string; hits: number; misses: number; extras: number; accuracy: number | null };
+
+/**
+ * A run's score grouped by each of its measure labels, such as every measure
+ * in B♭ major or every ii chord. Values appear in the order first played;
+ * measures that weren't reached count for nothing.
+ */
+export function scoreByTag(score: RunScore, tags: Record<string, string>[]): { tag: string; values: TagValueScore[] }[] {
+  const groups = new Map<string, Map<string, TagValueScore>>();
+  for (const m of score.measures) {
+    if (m.accuracy === null) continue;
+    for (const [tag, value] of Object.entries(tags[m.measure] ?? {})) {
+      const values = groups.get(tag) ?? new Map<string, TagValueScore>();
+      groups.set(tag, values);
+      const total = values.get(value) ?? { value, hits: 0, misses: 0, extras: 0, accuracy: null };
+      values.set(value, total);
+      total.hits += m.hits;
+      total.misses += m.misses;
+      total.extras += m.extras;
+      total.accuracy = ratio(total.hits, total.misses, total.extras);
+    }
+  }
+  return [...groups].map(([tag, values]) => ({ tag, values: [...values.values()] }));
+}
