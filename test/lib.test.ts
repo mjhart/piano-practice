@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseMidi } from '../app/lib/midi/parse.ts';
 import { buildSongModel } from '../app/lib/midi/songModel.ts';
+import { noteEvents, writeMidi } from '../app/lib/midi/write.ts';
 import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, scoreRun } from '../app/lib/scoring.ts';
 import { defaultSettings, resolveSettings } from '../app/lib/settings.ts';
 import type { PlayedEvent, Run } from '../app/types.ts';
@@ -280,4 +281,37 @@ test('default settings pick the piano part and trim the silence around it', () =
     firstMeasure: 1,
     lastMeasure: 3,
   });
+});
+
+test('writeMidi output reads back as the same events', () => {
+  const tracks = [
+    [
+      { tick: 0, type: 'tempo', usPerQuarter: 750000 },
+      { tick: 0, type: 'timeSig', numerator: 3, denominator: 4 },
+    ],
+    [
+      { tick: 0, type: 'trackName', name: 'Right' },
+      // A long gap needs a multi-byte delta, and E4 repeats at the tick it ends.
+      ...noteEvents([
+        { pitch: 64, tick: 20000, duration: 480 },
+        { pitch: 64, tick: 20480, duration: 480, velocity: 100, channel: 2 },
+        { pitch: 60, tick: 0, duration: 480 },
+      ]),
+    ],
+  ] as const;
+  const file = parseMidi(writeMidi({ ticksPerQuarter: 480, tracks: tracks.map((t) => [...t]) }).buffer as ArrayBuffer);
+  assert.equal(file.format, 1);
+  assert.equal(file.ticksPerQuarter, 480);
+  assert.deepEqual(file.tracks[0], tracks[0]);
+  assert.deepEqual(file.tracks[1], [
+    { tick: 0, type: 'trackName', name: 'Right' },
+    { tick: 0, type: 'noteOn', channel: 0, pitch: 60, velocity: 80 },
+    { tick: 480, type: 'noteOff', channel: 0, pitch: 60 },
+    { tick: 20000, type: 'noteOn', channel: 0, pitch: 64, velocity: 80 },
+    { tick: 20480, type: 'noteOff', channel: 0, pitch: 64 },
+    { tick: 20480, type: 'noteOn', channel: 2, pitch: 64, velocity: 100 },
+    { tick: 20960, type: 'noteOff', channel: 2, pitch: 64 },
+  ]);
+  const model = buildSongModel(file);
+  assert.equal(model.notes.length, 3);
 });
