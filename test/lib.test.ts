@@ -159,6 +159,19 @@ test('at half tempo the tolerance stays in real milliseconds and unreached measu
   });
 });
 
+test('wouldMatch says whether a note would pair without recording anything', () => {
+  const model = song();
+  const notes = expectedNotes(model, { tracks: [1], startMeasure: 0, endMeasure: 1 });
+  const matcher = new Matcher(notes, DEFAULT_TOLERANCE_MS, 1, 0);
+  assert.equal(matcher.wouldMatch(2.1, 67), true);
+  assert.equal(matcher.wouldMatch(2.3, 67), false);
+  assert.equal(matcher.wouldMatch(2.1, 60), false);
+  assert.equal(matcher.matched.size, 0);
+  assert.equal(matcher.extras.length, 0);
+  matcher.noteOn(2.1, 67);
+  assert.equal(matcher.wouldMatch(2.05, 67), false);
+});
+
 // Plays events through the live wait-mode clock, as the practice canvas does.
 function playWaiting(events: PlayedEvent[], endAt: number, tempoRate = 1) {
   const model = song();

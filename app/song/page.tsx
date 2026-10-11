@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { heatColor } from './components/HeatStrip';
 import { parseMidi } from '../lib/midi/parse';
 import { buildSongModel } from '../lib/midi/songModel';
 import { getMetronomeOffset, setMetronomeOffset } from '../lib/prefs';
@@ -12,7 +13,7 @@ import { store } from '../lib/store';
 import type { Run, SongModel } from '../types';
 import { HeatStrip } from './components/HeatStrip';
 import { PracticeCanvas, type PracticeConfig } from './components/PracticeCanvas';
-import { Results } from './components/Results';
+import { Results, percent } from './components/Results';
 import { RunHistory } from './components/RunHistory';
 
 type Range = [number, number];
@@ -20,7 +21,8 @@ type Range = [number, number];
 type Mode =
   | { kind: 'setup' }
   | { kind: 'playing'; config: PracticeConfig }
-  | { kind: 'results'; run: Run };
+  /** `passes` holds every pass of a loop, oldest first, when there was more than one. */
+  | { kind: 'results'; run: Run; passes?: Run[] };
 
 /** `trim` is the part of the piece kept in its settings, as inclusive measure indexes. */
 type Loaded = { title: string; model: SongModel; trim: Range };
@@ -45,6 +47,7 @@ function SongView() {
   const [tempo, setTempo] = useState(100);
   const [metronome, setMetronome] = useState(true);
   const [wait, setWait] = useState(false);
+  const [loop, setLoop] = useState(false);
   const [offset, setOffset] = useState(0);
 
   useEffect(() => {
@@ -85,12 +88,15 @@ function SongView() {
     return values;
   }, [scores]);
 
-  const onFinish = useCallback((run: Run) => {
+  // Each pass of a loop is saved as it ends, so stopping or leaving never loses the ones before.
+  const onRun = useCallback((run: Run) => {
     setRuns((previous) => [...previous, run]);
-    setMode({ kind: 'results', run });
     store.putRun(run).catch(() => setError('This run could not be saved. Storage may be full or blocked.'));
   }, []);
-  const onCancel = useCallback(() => setMode({ kind: 'setup' }), []);
+  const onEnd = useCallback((recorded: Run[]) => {
+    const run = recorded.at(-1);
+    setMode(run ? { kind: 'results', run, ...(recorded.length > 1 && { passes: recorded }) } : { kind: 'setup' });
+  }, []);
 
   if (error && !model) {
     return (
@@ -105,14 +111,41 @@ function SongView() {
   if (!model || !loaded) return <p className="text-haze">Loading…</p>;
 
   if (mode.kind === 'playing') {
-    return <PracticeCanvas song={model} songId={id} config={mode.config} onFinish={onFinish} onCancel={onCancel} />;
+    return <PracticeCanvas song={model} songId={id} config={mode.config} onRun={onRun} onEnd={onEnd} />;
   }
 
   if (mode.kind === 'results') {
-    const { run } = mode;
+    const { run, passes } = mode;
     return (
       <div className="space-y-6">
         {error && <p className="card border-ember text-sm text-ember">{error}</p>}
+        {passes && (
+          <section className="card space-y-3">
+            <h2 className="eyebrow">Looped {passes.length} times · choose a pass</h2>
+            <div className="flex flex-wrap gap-2">
+              {passes.map((pass, i) => {
+                const accuracy = scores[runs.indexOf(pass)]?.accuracy ?? null;
+                return (
+                  <button
+                    key={pass.id}
+                    type="button"
+                    className={`btn ${pass === run ? 'btn-primary' : ''}`}
+                    aria-pressed={pass === run}
+                    onClick={() => setMode({ kind: 'results', run: pass, passes })}
+                  >
+                    {i + 1}
+                    <span
+                      className={`ml-2 rounded-block px-1.5 font-semibold ${accuracy === null ? '' : 'text-night'}`}
+                      style={accuracy === null ? undefined : { background: heatColor(accuracy) }}
+                    >
+                      {percent(accuracy)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
         <Results
           key={run.id}
           run={run}
@@ -131,6 +164,7 @@ function SongView() {
                 tempoRate: run.tempoRate,
                 metronome: run.metronome,
                 wait: !!run.wait,
+                loop: run.pass !== undefined,
               },
             })
           }
@@ -145,7 +179,7 @@ function SongView() {
   const start = () =>
     setMode({
       kind: 'playing',
-      config: { tracks, startMeasure: range[0], endMeasure: range[1], tempoRate: tempo / 100, metronome, wait },
+      config: { tracks, startMeasure: range[0], endMeasure: range[1], tempoRate: tempo / 100, metronome, wait, loop },
     });
 
   return (
@@ -219,6 +253,11 @@ function SongView() {
             Wait for each note
           </label>
           <p className="text-xs text-haze">The music stops at every note until you play it.</p>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
+            Loop the section
+          </label>
+          <p className="text-xs text-haze">Plays it over and over until you stop. Each pass is scored.</p>
         </div>
 
         <div className="space-y-2">
