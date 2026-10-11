@@ -42,7 +42,8 @@ export function buildExercise({ parts, beatsPerMeasure, notes, tags }: Spec): Ex
     start: n.beat * SECONDS_PER_BEAT,
     duration: n.beats * SECONDS_PER_BEAT,
     track: n.part,
-    measure: Math.min(Math.floor(n.beat / beatsPerMeasure), measures.length - 1),
+    // Triplets add up to a whole beat only roughly, so allow a hair of rounding.
+    measure: Math.min(Math.floor(n.beat / beatsPerMeasure + 1e-9), measures.length - 1),
   }));
   const tracks: TrackInfo[] = parts.map((name, index) => ({
     index,

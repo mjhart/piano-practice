@@ -1,5 +1,8 @@
 import type { DrillConfig } from '../../types';
+import { arpeggios } from './arpeggios.ts';
 import { chordProgressions } from './chordProgressions.ts';
+import { randomNotes } from './randomNotes.ts';
+import { scales } from './scales.ts';
 import type { DrillDefinition } from './types';
 
 /**
@@ -10,6 +13,11 @@ import type { DrillDefinition } from './types';
 const register = <C extends DrillConfig>(drill: DrillDefinition<C>) => drill as unknown as DrillDefinition<DrillConfig>;
 
 /** Every drill, in the order the library lists them. Add new drills here. */
-export const drills: DrillDefinition<DrillConfig>[] = [register(chordProgressions)];
+export const drills: DrillDefinition<DrillConfig>[] = [
+  register(chordProgressions),
+  register(scales),
+  register(arpeggios),
+  register(randomNotes),
+];
 
 export const findDrill = (id: string) => drills.find((d) => d.id === id);

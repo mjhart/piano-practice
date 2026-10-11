@@ -1,7 +1,7 @@
+import { keysField, orderField, orderKeys } from './common.ts';
 import type { BeatNote } from './exercise.ts';
 import { buildExercise } from './exercise.ts';
-import { shuffle } from './random.ts';
-import { KEY_NAMES, bassRoot, circleOrder, diatonicChord, keyLabel, numeral, parseNumerals, rootPosition, tonicOf, voice } from './theory.ts';
+import { KEY_NAMES, bassRoot, diatonicChord, keyLabel, numeral, parseNumerals, rootPosition, tonicOf, voice } from './theory.ts';
 import type { Mode } from './theory.ts';
 import type { DrillDefinition } from './types';
 
@@ -54,18 +54,8 @@ export const chordProgressions: DrillDefinition<Config> = {
   description: 'Common progressions through the keys you choose, one chord per measure, voiced to move as little as possible.',
   version: 1,
   fields: [
-    { kind: 'multi', key: 'keys', label: 'Keys', options: KEY_NAMES.map((k) => ({ value: k, label: k.replace('b', '♭').replace('#', '♯') })) },
-    {
-      kind: 'choice',
-      key: 'order',
-      label: 'Key order',
-      options: [
-        { value: 'picked', label: 'In the order picked' },
-        { value: 'fifths-up', label: 'Up in fifths (C G D…)' },
-        { value: 'fifths-down', label: 'Down in fifths (C F B♭…)' },
-        { value: 'random', label: 'Random' },
-      ],
-    },
+    keysField('keys'),
+    orderField('order'),
     {
       kind: 'multi',
       key: 'progressions',
@@ -184,12 +174,7 @@ export const chordProgressions: DrillDefinition<Config> = {
   generate(config, rng) {
     const mode = config.mode as Mode;
     const size = config.size === 'sevenths' ? 4 : 3;
-    const keys =
-      config.order === 'random'
-        ? shuffle(config.keys, rng)
-        : config.order === 'fifths-up' || config.order === 'fifths-down'
-          ? circleOrder(config.keys, config.order === 'fifths-up' ? 'up' : 'down')
-          : config.keys;
+    const keys = orderKeys(config.keys, config.order, rng);
     const progressions = config.progressions.map((p) => PROGRESSIONS[p]).filter(Boolean);
     const custom = parseNumerals(config.custom);
     if (custom.length) progressions.push(custom);

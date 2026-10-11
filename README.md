@@ -43,13 +43,20 @@ npm run build   # static site in out/
 
 ## Drills
 
-Besides uploaded pieces, the library lists built-in drills. A drill makes its
-exercise from settings chosen on its page (the chord progression drill takes
-keys, progressions, major or minor, triads or sevenths, voicing and a right-hand
-pattern), and each comes with a few presets. "Save these settings" adds your
+Besides uploaded pieces, the library lists built-in drills, each making its
+exercise from settings chosen on its page and each with a few presets:
+
+- Chord progressions: keys, progressions (or your own in Roman numerals), major
+  or minor, triads or sevenths, voicing and a right-hand pattern.
+- Scales: major, the three minors, pentatonics, blues and chromatic, in any keys,
+  1 to 4 octaves, hands an octave apart or in contrary motion.
+- Arpeggios: major, minor, dominant and diminished sevenths, from any inversion.
+- Random notes: notes, intervals or triads at random within a range, one per
+  two beats; with "Wait for each note" on it becomes a reading-speed drill.
+ "Save these settings" adds your
 own preset, shared by every player like pieces are. Drills play and score
-exactly like pieces, measures are labelled with their key and chord, and results
-show how each key and chord went. Every run is in the player's history for that
+exactly like pieces. Measures are labelled (key, chord, scale, note…) and results
+show how each label went. Every run is in the player's history for that
 drill, whatever settings it used.
 
 To add a drill, write a file in `app/lib/drills/` exporting a `DrillDefinition`

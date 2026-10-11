@@ -3,11 +3,14 @@ import { test } from 'node:test';
 import { parseMidi } from '../app/lib/midi/parse.ts';
 import { buildSongModel } from '../app/lib/midi/songModel.ts';
 import { noteEvents, writeMidi } from '../app/lib/midi/write.ts';
+import { arpeggios } from '../app/lib/drills/arpeggios.ts';
 import { chordProgressions } from '../app/lib/drills/chordProgressions.ts';
+import { randomNotes } from '../app/lib/drills/randomNotes.ts';
+import { scales } from '../app/lib/drills/scales.ts';
 import { resolveConfig } from '../app/lib/drills/fields.ts';
 import { seededRng } from '../app/lib/drills/random.ts';
 import { drills } from '../app/lib/drills/registry.ts';
-import { KEY_NAMES, diatonicChord, numeral, parseNumerals } from '../app/lib/drills/theory.ts';
+import { KEY_NAMES, diatonicChord, isWhite, numeral, parseNumerals } from '../app/lib/drills/theory.ts';
 import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, scoreByTag, scoreRun } from '../app/lib/scoring.ts';
 import { upgradeRun } from '../app/lib/sources.ts';
 import { defaultSettings, resolveSettings } from '../app/lib/settings.ts';
@@ -388,4 +391,60 @@ test('random key order changes with the seed but not without it', () => {
   const keys = (seed: number) => chordProgressions.generate(config, seededRng(seed)).tags.map((t) => t.key).join();
   assert.equal(keys(1), keys(1));
   assert.notEqual(keys(1), keys(2));
+});
+
+const rightHand = (exercise: { notes: { track: number; pitch: number }[] }) =>
+  exercise.notes.filter((n) => n.track === 0).map((n) => n.pitch);
+
+test('melodic minor goes up with raised 6th and 7th and comes down natural', () => {
+  const config = resolveConfig(scales, { keys: ['A'], scales: ['melodic-minor'], octaves: 1, direction: 'up-down' });
+  assert.deepEqual(rightHand(scales.generate(config, seededRng(1))), [69, 71, 72, 74, 76, 78, 80, 81, 79, 77, 76, 74, 72, 71, 69]);
+});
+
+test('contrary motion moves the hands apart from an octave and back', () => {
+  const config = resolveConfig(scales, { keys: ['C'], octaves: 1, motion: 'contrary' });
+  const exercise = scales.generate(config, seededRng(1));
+  const left = exercise.notes.filter((n) => n.track === 1).map((n) => n.pitch);
+  assert.deepEqual(left, [48, 47, 45, 43, 41, 40, 38, 36, 38, 40, 41, 43, 45, 47, 48]);
+  assert.equal(rightHand(exercise)[7], 72);
+});
+
+test('triplet runs land in the right measures and the last note fills its measure', () => {
+  const config = resolveConfig(scales, { keys: ['C'], octaves: 2, direction: 'up', value: 'triplet' });
+  const exercise = scales.generate(config, seededRng(1));
+  // 15 notes of a third of a beat: 12 fill measure 1, 3 start measure 2.
+  assert.deepEqual(exercise.notes.filter((n) => n.track === 0).map((n) => n.measure), [...Array(12).fill(0), 1, 1, 1]);
+  const last = exercise.notes.filter((n) => n.track === 0).at(-1)!;
+  assert.equal(Math.round((last.start + last.duration) * 1000), Math.round(exercise.measures[1].end * 1000));
+});
+
+test('arpeggio inversions start on the right chord tone', () => {
+  const config = resolveConfig(arpeggios, { keys: ['C'], chords: ['major'], inversion: 'first', octaves: 1, direction: 'up' });
+  assert.deepEqual(rightHand(arpeggios.generate(config, seededRng(1))), [64, 67, 72, 76]);
+  const all = resolveConfig(arpeggios, { keys: ['C'], chords: ['dominant7'], inversion: 'all', octaves: 1 });
+  assert.deepEqual([...new Set(arpeggios.generate(all, seededRng(1)).tags.map((t) => t.inversion))], [
+    'root position',
+    '1st inversion',
+    '2nd inversion',
+    '3rd inversion',
+  ]);
+});
+
+test('random notes stay in range, on white keys and within the largest jump', () => {
+  const config = resolveConfig(randomNotes, { low: '60', high: '72', whiteOnly: true, size: '1', maxJump: 4, count: 40 });
+  const pitches = randomNotes.generate(config, seededRng(5)).notes.map((n) => n.pitch);
+  assert.equal(pitches.length, 40);
+  assert.ok(pitches.every((p) => p >= 60 && p <= 72 && isWhite(p)));
+  assert.ok(pitches.slice(1).every((p, i) => Math.abs(p - pitches[i]) <= 4));
+});
+
+test('random triads are major or minor and named for their root', () => {
+  const config = resolveConfig(randomNotes, { size: '3', low: '55', high: '79', whiteOnly: false, count: 30 });
+  const exercise = randomNotes.generate(config, seededRng(9));
+  for (const [i, tag] of exercise.tags.entries()) {
+    const pcs = exercise.notes.filter((n) => n.measure === i).map((n) => n.pitch % 12);
+    const root = KEY_NAMES.indexOf(tag.chord.split(' ')[0].replace('♭', 'b').replace('♯', '#'));
+    const third = tag.chord.endsWith('major') ? 4 : 3;
+    assert.deepEqual(new Set(pcs), new Set([root, (root + third) % 12, (root + 7) % 12]), tag.chord);
+  }
 });

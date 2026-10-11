@@ -100,3 +100,10 @@ export function voice(pcs: number[], previous: number[] | null): number[] {
 
 /** The chord's root for the left hand, from E2 to D#3. */
 export const bassRoot = (pc: number) => 40 + ((pc - 4 + 12) % 12);
+
+const PITCH_NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+
+/** "F♯3", with middle C as C4. */
+export const pitchName = (pitch: number) => `${PITCH_NAMES[pitch % 12]}${Math.floor(pitch / 12) - 1}`;
+
+export const isWhite = (pitch: number) => ![1, 3, 6, 8, 10].includes(pitch % 12);
