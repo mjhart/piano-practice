@@ -7,7 +7,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "chord-drill": "node --experimental-strip-types --no-warnings scripts/chord-drill.ts"
   },
   "dependencies": {
     "next": "^15.5.0",

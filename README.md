@@ -41,6 +41,15 @@ npm run lint
 npm run build   # static site in out/
 ```
 
+## Writing MIDI files
+
+`app/lib/midi/write.ts` writes Standard MIDI Files from the same events the
+parser reads, so drills can be generated in code. `npm run chord-drill` writes
+`sample-midis/chord-drill.mid` (or the path after `--`): I-IV-V-I and ii-V-I-I
+in C, G, F, D and Bb, one chord per measure, triads in the right hand and roots
+in the left. Edit the constants at the top of `scripts/chord-drill.ts` to
+change keys, progressions or tempo.
+
 ## How scoring works
 
 A played note is a hit if it has the right pitch and lands within 150 ms of the
