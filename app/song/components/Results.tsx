@@ -130,7 +130,14 @@ export function Results({ run, score, onPractice, onAgain, onRestore, onBack, ba
   );
 }
 
-const TAG_HEADINGS: Record<string, string> = { key: 'By key', chord: 'By chord' };
+const TAG_HEADINGS: Record<string, string> = {
+  key: 'By key',
+  chord: 'By chord',
+  scale: 'By scale',
+  inversion: 'By inversion',
+  note: 'By note',
+  interval: 'By interval',
+};
 
 /** How each key, chord and so on went, for exercises that label their measures. */
 function TagScores({ score, tags }: { score: RunScore; tags: Record<string, string>[] }) {
