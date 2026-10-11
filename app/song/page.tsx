@@ -174,7 +174,7 @@ function SongView() {
           )}
         </div>
         <p className="text-sm text-haze">
-          Drag across measures, or shift-click, to practice one section. Colours show how each measure went the last
+          Tap the first and last measure, or drag across them, to practice one section. Colours show how each measure went the last
           time you played it.
         </p>
         <HeatStrip from={trim[0]} to={trim[1]} values={standing} selection={range} onSelect={setRange} />

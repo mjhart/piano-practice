@@ -31,16 +31,42 @@ export function heatColor(accuracy: number): string {
   return `rgb(${r} ${g} ${b})`;
 }
 
-/** One cell per measure, coloured by accuracy. Drag (or shift-click) to select a section. */
-export function HeatStrip({ from, to, values, selection, onSelect }: Props) {
-  const anchor = useRef<number | null>(null);
+/** The measure cell under a point, if any. */
+function measureAt(x: number, y: number): number | null {
+  const cell = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-measure]');
+  return cell ? Number(cell.dataset.measure) : null;
+}
 
-  const pick = (measure: number, extend: boolean) => {
+/**
+ * One cell per measure, coloured by accuracy. Tap a measure to select it, then tap another to extend the selection
+ * to it; drag across measures (or shift-click) to select a section in one go. On touch the strip still scrolls
+ * vertically, so a section is only selected once a press ends or turns into a sideways drag.
+ */
+export function HeatStrip({ from, to, values, selection, onSelect }: Props) {
+  // The end of a drag or shift-click selection that stays put.
+  const anchor = useRef<number | null>(null);
+  // The measure a press started on, and whether it has since dragged to another one.
+  const press = useRef<{ measure: number; dragged: boolean } | null>(null);
+  // A measure tapped on its own, waiting for a second tap to make it a section.
+  const pending = useRef<number | null>(null);
+
+  const tap = (measure: number, extend: boolean) => {
     if (extend && selection) {
       anchor.current = anchor.current ?? selection[0];
+      pending.current = null;
+      onSelect(ordered(anchor.current, measure));
+    } else if (
+      pending.current !== null &&
+      pending.current !== measure &&
+      selection?.[0] === pending.current &&
+      selection[1] === pending.current
+    ) {
+      anchor.current = pending.current;
+      pending.current = null;
       onSelect(ordered(anchor.current, measure));
     } else {
       anchor.current = measure;
+      pending.current = measure;
       onSelect([measure, measure]);
     }
   };
@@ -53,22 +79,19 @@ export function HeatStrip({ from, to, values, selection, onSelect }: Props) {
       <button
         key={m}
         type="button"
+        data-measure={m}
         aria-pressed={selected}
         aria-label={`Measure ${m + 1}${value === null ? '' : `, ${Math.round(value * 100)}% accurate`}`}
         style={value === null ? undefined : { background: heatColor(value) }}
         className={`flex h-11 w-11 cursor-pointer flex-col items-center justify-center rounded-block border-2 text-xs leading-tight ${
           value === null ? 'bg-slate text-snow' : 'text-night'
         } ${selected ? 'border-snow shadow-[inset_0_0_0_2px_var(--color-night)]' : 'border-transparent'}`}
-        onPointerDown={(e) => {
+        onKeyDown={(e) => {
+          // Pointer presses are handled on the strip; this covers the keyboard. Not onClick, since a touch tap's
+          // click can arrive looking like a keyboard one and would undo the selection.
+          if (e.key !== 'Enter' && e.key !== ' ') return;
           e.preventDefault();
-          pick(m, e.shiftKey);
-        }}
-        onPointerEnter={(e) => {
-          if (e.buttons === 1 && anchor.current !== null) onSelect(ordered(anchor.current, m));
-        }}
-        onClick={(e) => {
-          // Pointer presses are handled above; this covers the keyboard.
-          if (e.detail === 0) pick(m, e.shiftKey);
+          tap(m, e.shiftKey);
         }}
       >
         <span className="font-bold">{m + 1}</span>
@@ -76,5 +99,42 @@ export function HeatStrip({ from, to, values, selection, onSelect }: Props) {
       </button>,
     );
   }
-  return <div className="flex touch-none flex-wrap gap-1 select-none">{cells}</div>;
+
+  return (
+    <div
+      // pan-y keeps vertical scrolling on touch; sideways drags come here instead.
+      className="flex touch-pan-y flex-wrap gap-1 select-none [-webkit-touch-callout:none]"
+      onPointerDown={(e) => {
+        const m = measureAt(e.clientX, e.clientY);
+        if (m === null || (e.pointerType === 'mouse' && e.button !== 0)) return;
+        e.preventDefault();
+        // Keep the rest of the press here, even if it wanders off the strip.
+        e.currentTarget.setPointerCapture(e.pointerId);
+        press.current = { measure: m, dragged: false };
+        // A mouse can't be scrolling, so it selects straight away, as it always has.
+        if (e.pointerType === 'mouse') tap(m, e.shiftKey);
+      }}
+      onPointerMove={(e) => {
+        const p = press.current;
+        if (!p) return;
+        const m = measureAt(e.clientX, e.clientY);
+        if (m === null || (m === p.measure && !p.dragged)) return;
+        p.dragged = true;
+        anchor.current = p.measure;
+        pending.current = null;
+        onSelect(ordered(p.measure, m));
+      }}
+      onPointerUp={(e) => {
+        const p = press.current;
+        press.current = null;
+        if (p && !p.dragged && e.pointerType !== 'mouse') tap(p.measure, false);
+      }}
+      onPointerCancel={() => {
+        // The browser took the touch over to scroll the page.
+        press.current = null;
+      }}
+    >
+      {cells}
+    </div>
+  );
 }
