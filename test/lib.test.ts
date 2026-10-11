@@ -62,6 +62,7 @@ function build(meta: number[], parts: { name: string; channel: number; rest: num
 const run = (overrides: Partial<Run>): Run => ({
   id: 'run',
   songId: 'song',
+  userId: 'user',
   startedAt: 0,
   startMeasure: 0,
   endMeasure: 1,

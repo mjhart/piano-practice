@@ -25,6 +25,14 @@ are drawn as a piano roll and you can listen to them), set the tempo the piece
 should open at, and drag the edges of the roll to trim off intros, outros or
 empty measures. "Set up" on the library or piece page brings the screen back.
 
+## Players
+
+Several people can practise on the same device. Pick who is playing from the
+Player menu at the top of every page; the same menu adds, renames and removes
+players. Pieces and their setup are shared, while each player has their own
+runs, history and measure colours. Practice recorded before players existed
+belongs to the first player, "Player 1".
+
 ## Other commands
 
 ```

@@ -1,5 +1,5 @@
-// Plain, JSON-shaped data shared across the app. Song and Run are what the
-// store persists; if a backend is added later these become the wire types.
+// Plain, JSON-shaped data shared across the app. Song, User and Run are what
+// the store persists; if a backend is added later these become the wire types.
 
 // ---- Song model: derived from the MIDI file, never stored ----
 
@@ -70,6 +70,13 @@ export type Song = {
 
 export type SongSummary = Omit<Song, 'midi'>;
 
+/** Someone who practises on this device. Songs are shared; runs belong to one user. */
+export type User = {
+  id: string;
+  name: string;
+  addedAt: number;
+};
+
 export type PlayedEvent = {
   /** Real milliseconds since the run's clock started. */
   t: number;
@@ -89,6 +96,8 @@ export type Hold = {
 export type Run = {
   id: string;
   songId: string;
+  /** Who played it. Runs recorded before there were users belong to the first user. */
+  userId: string;
   startedAt: number;
   /** Inclusive measure indexes. A full play-through covers every measure. */
   startMeasure: number;

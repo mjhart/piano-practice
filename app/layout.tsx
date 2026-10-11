@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { DM_Sans, Righteous } from 'next/font/google';
 import Link from 'next/link';
 import { MidiStatus } from './components/MidiStatus';
+import { UserPicker } from './components/UserPicker';
 import './globals.css';
 
 const righteous = Righteous({ subsets: ['latin'], weight: '400', variable: '--font-righteous' });
@@ -46,7 +47,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="title text-3xl hover:text-gold sm:text-4xl">
               Piano Practice
             </Link>
-            <MidiStatus />
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <UserPicker />
+              <MidiStatus />
+            </div>
           </div>
           <SunsetRidge />
         </header>
