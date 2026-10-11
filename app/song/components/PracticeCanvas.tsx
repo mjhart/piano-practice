@@ -15,15 +15,18 @@ export type PracticeConfig = {
   metronome: boolean;
   /** Stop at each note until it is played. */
   wait: boolean;
+  /** Play the section over and over until stopped. Each pass is recorded as its own run. */
+  loop: boolean;
 };
 
 type Props = {
   song: SongModel;
   songId: string;
   config: PracticeConfig;
-  onFinish: (run: Run) => void;
-  /** The run was ended before the first measure began; nothing is recorded. */
-  onCancel: () => void;
+  /** A run was recorded: the whole section, or one pass of a loop. */
+  onRun: (run: Run) => void;
+  /** Practice ended. Every run recorded, oldest first; empty if it ended before the first measure began. */
+  onEnd: (runs: Run[]) => void;
 };
 
 // Canvas can't read Tailwind classes; these mirror the tokens in globals.css.
@@ -54,17 +57,17 @@ const LEAD_MS = 300;
 
 const isBlack = (pitch: number) => [1, 3, 6, 8, 10].includes(pitch % 12);
 
-export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Props) {
+export function PracticeCanvas({ song, songId, config, onRun, onEnd }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const positionRef = useRef<HTMLSpanElement>(null);
   const hitsRef = useRef<HTMLSpanElement>(null);
   const metronomeRef = useRef<Metronome | null>(null);
   const endRef = useRef<() => void>(() => {});
-  const callbacks = useRef({ onFinish, onCancel });
+  const callbacks = useRef({ onRun, onEnd });
   const [metronomeOn, setMetronomeOn] = useState(config.metronome);
 
   useEffect(() => {
-    callbacks.current = { onFinish, onCancel };
+    callbacks.current = { onRun, onEnd };
   });
 
   useEffect(() => {
@@ -80,77 +83,172 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
     // ---- Transport: one mapping between real time and song time ----
     // The count-in is one measure long, so the song clock starts a measure early.
     const countIn = first.end - first.start;
+    const countInMs = (countIn / rate) * 1000;
     const originTime = rangeStart - countIn;
-    const startedAtPerf = performance.now() + LEAD_MS;
-    const startedAt = Date.now() + LEAD_MS;
-    const matcher = new Matcher(notes, DEFAULT_TOLERANCE_MS, rate, rangeStart);
-    // In wait mode the clock stops at each note until the matcher pairs it.
-    const gate = config.wait ? new WaitGate(notes, matcher, originTime, rate) : null;
-    const songTimeAt = (perf: number) =>
-      gate ? gate.songTime(perf - startedAtPerf) : songTimeOf({ originTime, tempoRate: rate }, perf - startedAtPerf);
-    const perfTimeAt = (songTime: number) => startedAtPerf + ((songTime - originTime) / rate) * 1000;
+    const loopLength = rangeEnd - rangeStart;
     // Keep going a moment past the last measure so a late final note still counts.
     const stopAt = rangeEnd + tolSec + 0.4 * rate;
+
+    // ---- Passes ----
+    // Each pass through the section has its own clock, matcher and events, so it
+    // is stored as an ordinary run. When looping, each pass's clock reaches the
+    // start of the section just as the one before reaches the end, as if it had
+    // counted in over the last measure, so the music runs on.
+    type Pass = {
+      number: number;
+      startedAtPerf: number;
+      startedAt: number;
+      matcher: Matcher;
+      // In wait mode the clock stops at each note until the matcher pairs it.
+      gate: WaitGate | null;
+      events: PlayedEvent[];
+      done: boolean;
+    };
+    const newPass = (number: number, startedAtPerf: number): Pass => {
+      const matcher = new Matcher(notes, DEFAULT_TOLERANCE_MS, rate, rangeStart);
+      return {
+        number,
+        startedAtPerf,
+        startedAt: Date.now() + (startedAtPerf - performance.now()),
+        matcher,
+        gate: config.wait ? new WaitGate(notes, matcher, originTime, rate) : null,
+        events: [],
+        done: false,
+      };
+    };
+    const songTimeAt = (pass: Pass, perf: number) =>
+      pass.gate
+        ? pass.gate.songTime(perf - pass.startedAtPerf)
+        : songTimeOf({ originTime, tempoRate: rate }, perf - pass.startedAtPerf);
+    // When a pass reached the end of the section. Every stop comes before that, so its holds are complete.
+    const endPerf = (pass: Pass) =>
+      pass.startedAtPerf +
+      ((rangeEnd - originTime) / rate) * 1000 +
+      (pass.gate?.holds.reduce((sum, h) => sum + h.ms, 0) ?? 0);
+    let current = newPass(1, performance.now() + LEAD_MS);
+    // Around the loop point: the pass before, while a late final note can still
+    // count there, and the next pass, so an early first note counts there.
+    let previous: Pass | null = null;
+    let next: Pass | null = null;
 
     // ---- Metronome ----
     // Clicks are scheduled ahead on a steady clock, so wait mode keeps only the count-in.
     const rangeBeats = song.beats.filter((b) => b.measure >= config.startMeasure && b.measure <= config.endMeasure);
     const countInBeats = rangeBeats.filter((b) => b.measure === config.startMeasure);
-    const clicks: Click[] = [
-      ...countInBeats.map((b) => ({ perfTime: perfTimeAt(b.time - countIn), downbeat: b.downbeat, countIn: true })),
-      ...(gate ? [] : rangeBeats.map((b) => ({ perfTime: perfTimeAt(b.time), downbeat: b.downbeat, countIn: false }))),
-    ];
-    const metronome = new Metronome(clicks, config.metronome && !gate, getMetronomeOffset());
+    const clicksFor = (startedAtPerf: number, withCountIn: boolean): Click[] => {
+      const at = (songTime: number) => startedAtPerf + ((songTime - originTime) / rate) * 1000;
+      return [
+        ...(withCountIn
+          ? countInBeats.map((b) => ({ perfTime: at(b.time - countIn), downbeat: b.downbeat, countIn: true }))
+          : []),
+        ...(config.wait ? [] : rangeBeats.map((b) => ({ perfTime: at(b.time), downbeat: b.downbeat, countIn: false }))),
+      ];
+    };
+    // Without wait mode every pass is the same length, so the clicks for the next pass are queued a pass ahead.
+    const loopMs = (loopLength / rate) * 1000;
+    const metronome = new Metronome(
+      [
+        ...clicksFor(current.startedAtPerf, true),
+        ...(config.loop && !config.wait ? clicksFor(current.startedAtPerf + loopMs, false) : []),
+      ],
+      config.metronome && !config.wait,
+      getMetronomeOffset(),
+    );
     metronomeRef.current = metronome;
     metronome.start();
 
-    // ---- Input and live matching ----
-    const events: PlayedEvent[] = [];
-    const held = new Set<number>();
-    const unsubscribe = subscribeNotes((e) => {
-      if (e.on) held.add(e.pitch);
-      else held.delete(e.pitch);
-      const t = e.timeStamp - startedAtPerf;
-      if (t < 0) return;
-      events.push({ t, pitch: e.pitch, velocity: e.velocity, on: e.on });
-      if (!e.on) return;
-      matcher.noteOn(songTimeAt(e.timeStamp), e.pitch);
-      gate?.update(t);
-    });
-
-    let finished = false;
-    const finish = (completed: boolean) => {
-      if (finished) return;
-      finished = true;
-      const now = performance.now();
-      const reachedTime = songTimeAt(now);
-      gate?.update(now - startedAtPerf, true);
-      if (reachedTime <= rangeStart) {
-        callbacks.current.onCancel();
-        return;
-      }
-      callbacks.current.onFinish({
+    // ---- Ending passes ----
+    const recorded: Run[] = [];
+    const finishPass = (pass: Pass, perf: number, completed: boolean) => {
+      if (pass.done) return;
+      pass.done = true;
+      const reachedTime = songTimeAt(pass, perf);
+      pass.gate?.update(perf - pass.startedAtPerf, true);
+      // Ended before the first measure began: nothing to record.
+      if (reachedTime <= rangeStart) return;
+      const run: Run = {
         id: crypto.randomUUID(),
         songId,
-        startedAt,
+        startedAt: pass.startedAt,
         startMeasure: config.startMeasure,
         endMeasure: config.endMeasure,
         tempoRate: rate,
         tracks: config.tracks,
-        metronome: config.metronome && !gate,
-        ...(gate && { wait: true, holds: gate.holds }),
+        metronome: config.metronome && !config.wait,
+        ...(pass.gate && { wait: true, holds: pass.gate.holds }),
+        ...(config.loop && { pass: pass.number }),
         toleranceMs: DEFAULT_TOLERANCE_MS,
         originTime,
         reachedTime,
         completed,
-        events,
-      });
+        events: pass.events,
+      };
+      recorded.push(run);
+      callbacks.current.onRun(run);
     };
-    endRef.current = () => finish(false);
+
+    let ended = false;
+    const end = (completed: boolean) => {
+      if (ended) return;
+      ended = true;
+      const now = performance.now();
+      if (previous) finishPass(previous, now, true);
+      finishPass(current, now, completed);
+      if (next) finishPass(next, now, false);
+      callbacks.current.onEnd(recorded);
+    };
+    endRef.current = () => end(false);
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') finish(false);
+      if (e.key === 'Escape') end(false);
     };
     window.addEventListener('keydown', onKeyDown);
+
+    /** Moves the transport on to `perf`: closes passes that are over and opens the next one. */
+    const advance = (perf: number) => {
+      if (previous && songTimeAt(previous, perf) >= rangeEnd + tolSec) finishPass(previous, perf, true);
+      const songTime = songTimeAt(current, perf);
+      if (!config.loop) {
+        if (songTime >= stopAt) end(true);
+        return;
+      }
+      // In wait mode, when the next pass starts is only known once every note in this one is played.
+      if (!next && songTime >= rangeEnd - tolSec && (current.gate?.released ?? true)) {
+        next = newPass(current.number + 1, endPerf(current) - countInMs);
+        if (!config.wait) metronome.add(clicksFor(next.startedAtPerf + loopMs, false));
+      }
+      if (next && songTime >= rangeEnd) {
+        if (previous) finishPass(previous, perf, true);
+        previous = current;
+        current = next;
+        next = null;
+      }
+    };
+
+    // ---- Input and live matching ----
+    const held = new Set<number>();
+    const unsubscribe = subscribeNotes((e) => {
+      if (e.on) held.add(e.pitch);
+      else held.delete(e.pitch);
+      if (ended) return;
+      advance(e.timeStamp);
+      // A note belongs to the pass being played, unless it only pairs with a
+      // note in the one before or after: a late last note or an early first one.
+      const neighbour = [previous, next].find(
+        (p) =>
+          p &&
+          !p.done &&
+          e.on &&
+          !current.matcher.wouldMatch(songTimeAt(current, e.timeStamp), e.pitch) &&
+          p.matcher.wouldMatch(songTimeAt(p, e.timeStamp), e.pitch),
+      );
+      const pass = neighbour ?? current;
+      const t = e.timeStamp - pass.startedAtPerf;
+      if (t < 0) return;
+      pass.events.push({ t, pitch: e.pitch, velocity: e.velocity, on: e.on });
+      if (!e.on) return;
+      pass.matcher.noteOn(songTimeAt(pass, e.timeStamp), e.pitch);
+      pass.gate?.update(t);
+    });
 
     // ---- Keyboard geometry: whole octaves around the notes in play ----
     const pitches = notes.map((n) => n.pitch);
@@ -172,12 +270,11 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
 
     let frame = 0;
     const draw = () => {
-      const songTime = songTimeAt(performance.now());
-      if (songTime >= stopAt) {
-        finish(true);
-        return;
-      }
+      const now = performance.now();
+      advance(now);
+      if (ended) return;
       frame = requestAnimationFrame(draw);
+      const songTime = songTimeAt(current, now);
 
       const dpr = window.devicePixelRatio || 1;
       const width = canvas.clientWidth;
@@ -206,43 +303,59 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
       g.rect(0, 0, width, hitY);
       g.clip();
 
+      // What is on screen, in this pass's song time: this pass, the tail of the
+      // one before, and when looping, the passes still to come.
+      const layers: { offset: number; matcher: Matcher | null }[] = [{ offset: 0, matcher: current.matcher }];
+      if (previous) layers.push({ offset: -loopLength, matcher: previous.matcher });
+      for (let k = 1; config.loop && loopLength > 0 && rangeStart + k * loopLength <= songTime + windowSec; k++) {
+        layers.push({ offset: k * loopLength, matcher: k === 1 ? (next?.matcher ?? null) : null });
+      }
+
       // Beat and measure lines.
       g.font = `12px ${bodyFont}`;
-      for (const beat of rangeBeats) {
-        if (beat.time < songTime || beat.time > songTime + windowSec) continue;
-        g.fillStyle = beat.downbeat ? COLOR.rule : COLOR.slate;
-        g.fillRect(0, y(beat.time), width, beat.downbeat ? 2 : 1);
-        if (beat.downbeat) {
-          g.fillStyle = COLOR.haze;
-          g.fillText(String(beat.measure + 1), 6, y(beat.time) - 5);
+      for (const { offset } of layers) {
+        for (const beat of rangeBeats) {
+          const time = beat.time + offset;
+          if (time < songTime || time > songTime + windowSec) continue;
+          g.fillStyle = beat.downbeat ? COLOR.rule : COLOR.slate;
+          g.fillRect(0, y(time), width, beat.downbeat ? 2 : 1);
+          if (beat.downbeat) {
+            g.fillStyle = COLOR.haze;
+            g.fillText(String(beat.measure + 1), 6, y(time) - 5);
+          }
         }
       }
 
       // Falling notes.
-      for (const n of notes) {
-        if (n.start > songTime + windowSec) break;
-        if (n.start + n.duration < songTime - windowSec) continue;
-        const top = y(n.start + n.duration);
-        const bottom = y(n.start);
-        const missed = !matcher.matched.has(n.id) && n.start < songTime - tolSec;
-        if (matcher.matched.has(n.id)) g.fillStyle = COLOR.snow;
-        else if (missed) g.fillStyle = COLOR.night;
-        else g.fillStyle = trackColor.get(n.track) ?? COLOR.gold;
-        g.globalAlpha = isBlack(n.pitch) ? 0.8 : 1;
-        g.beginPath();
-        g.roundRect(keyX(n.pitch) + 2, top + 1, keyWidth(n.pitch) - 4, Math.max(bottom - top, 6) - 2, 2);
-        g.fill();
-        if (missed) {
-          g.strokeStyle = COLOR.haze;
-          g.lineWidth = 2;
-          g.stroke();
+      for (const { offset, matcher } of layers) {
+        for (const n of notes) {
+          const start = n.start + offset;
+          if (start > songTime + windowSec) break;
+          if (start + n.duration < songTime - windowSec) continue;
+          const top = y(start + n.duration);
+          const bottom = y(start);
+          const hit = matcher?.matched.has(n.id) ?? false;
+          const missed = matcher !== null && !hit && start < songTime - tolSec;
+          if (hit) g.fillStyle = COLOR.snow;
+          else if (missed) g.fillStyle = COLOR.night;
+          else g.fillStyle = trackColor.get(n.track) ?? COLOR.gold;
+          g.globalAlpha = isBlack(n.pitch) ? 0.8 : 1;
+          g.beginPath();
+          g.roundRect(keyX(n.pitch) + 2, top + 1, keyWidth(n.pitch) - 4, Math.max(bottom - top, 6) - 2, 2);
+          g.fill();
+          if (missed) {
+            g.strokeStyle = COLOR.haze;
+            g.lineWidth = 2;
+            g.stroke();
+          }
         }
       }
       g.globalAlpha = 1;
       g.restore();
 
       // While the song waits, mark the keys it is waiting for.
-      const waiting = gate?.waiting(performance.now() - startedAtPerf) ?? false;
+      const gate = current.gate;
+      const waiting = gate?.waiting(now - current.startedAtPerf) ?? false;
       const wanted = new Map(waiting ? gate!.pending(tolSec).map((n) => [n.pitch, n.track]) : []);
       const marker = (p: number, keyHeight: number) => {
         if (!wanted.has(p) || held.has(p)) return;
@@ -274,7 +387,7 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
       g.fillRect(0, hitY - 2, width, 3);
 
       // Count-in: show the beat being counted.
-      if (songTime < rangeStart) {
+      if (current.number === 1 && songTime < rangeStart) {
         const begun = countInBeats.filter((b) => b.time - countIn <= songTime).length;
         g.fillStyle = COLOR.snow;
         g.font = `120px ${displayFont}`;
@@ -312,14 +425,15 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
         while (measure < config.endMeasure && song.measures[measure + 1].start <= songTime) measure++;
         positionRef.current.textContent =
           `Measure ${measure + 1} of ${config.startMeasure + 1}–${config.endMeasure + 1}` +
+          (config.loop ? ` · pass ${current.number}` : '') +
           (waiting ? ' · waiting for you' : '');
       }
-      if (hitsRef.current) hitsRef.current.textContent = `${matcher.matched.size} hit`;
+      if (hitsRef.current) hitsRef.current.textContent = `${current.matcher.matched.size} hit`;
     };
     frame = requestAnimationFrame(draw);
 
     return () => {
-      finished = true;
+      ended = true;
       cancelAnimationFrame(frame);
       window.removeEventListener('keydown', onKeyDown);
       unsubscribe();
@@ -341,6 +455,7 @@ export function PracticeCanvas({ song, songId, config, onFinish, onCancel }: Pro
           <span ref={hitsRef} className="font-semibold text-gold" />
           <span className="text-haze">
             {Math.round(config.tempoRate * 100)}% tempo{config.wait ? ' · waits for each note' : ''}
+            {config.loop ? ' · looping' : ''}
           </span>
         </p>
         <div className="flex gap-3">

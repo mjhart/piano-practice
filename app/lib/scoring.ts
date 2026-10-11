@@ -79,6 +79,22 @@ export class Matcher {
   }
 
   noteOn(songTime: number, pitch: number): Note | null {
+    const best = this.find(songTime, pitch);
+    if (best) {
+      this.matched.set(best.id, ((songTime - best.start) / this.rate) * 1000);
+    } else if (songTime >= this.rangeStart - this.tolSec) {
+      // Anything played during the count-in is ignored rather than penalised.
+      this.extras.push({ time: songTime, pitch });
+    }
+    return best;
+  }
+
+  /** Whether noteOn would pair this with an expected note. Changes nothing. */
+  wouldMatch(songTime: number, pitch: number): boolean {
+    return this.find(songTime, pitch) !== null;
+  }
+
+  private find(songTime: number, pitch: number): Note | null {
     let best: Note | null = null;
     let bestDistance = Infinity;
     for (const n of this.byPitch.get(pitch) ?? []) {
@@ -89,12 +105,6 @@ export class Matcher {
         best = n;
         bestDistance = distance;
       }
-    }
-    if (best) {
-      this.matched.set(best.id, ((songTime - best.start) / this.rate) * 1000);
-    } else if (songTime >= this.rangeStart - this.tolSec) {
-      // Anything played during the count-in is ignored rather than penalised.
-      this.extras.push({ time: songTime, pitch });
     }
     return best;
   }
@@ -128,6 +138,11 @@ export class WaitGate {
   songTime(t: number): number {
     const free = songTimeOf(this, t);
     return this.at !== null && free > this.at ? this.at : free;
+  }
+
+  /** Every note has been played, so the clock runs free to the end. */
+  get released(): boolean {
+    return this.at === null;
   }
 
   /** Whether the clock is stopped at t, waiting for notes. */

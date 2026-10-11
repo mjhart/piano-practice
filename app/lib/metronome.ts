@@ -25,7 +25,7 @@ export class Metronome {
   /** offsetMs plays every click that much earlier, to cancel out audio latency. */
   constructor(clicks: Click[], enabled: boolean, offsetMs: number) {
     this.ctx = new AudioContext();
-    this.clicks = clicks;
+    this.clicks = [...clicks];
     this.enabled = enabled;
     this.offsetMs = offsetMs;
   }
@@ -34,6 +34,11 @@ export class Metronome {
     void this.ctx.resume();
     this.timer = setInterval(() => this.schedule(), TICK_MS);
     this.schedule();
+  }
+
+  /** Queues more clicks. They must come after every click already queued. */
+  add(clicks: Click[]) {
+    this.clicks.push(...clicks);
   }
 
   stop() {

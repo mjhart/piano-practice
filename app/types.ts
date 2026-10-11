@@ -101,6 +101,11 @@ export type Run = {
   wait?: boolean;
   /** Where wait mode stopped the song, in order. */
   holds?: Hold[];
+  /**
+   * Which pass this was, from 1, when the section was looped. Each pass is its
+   * own run. Absent when the section was played once.
+   */
+  pass?: number;
   toleranceMs: number;
   /**
    * Song time at t = 0, so songTime = originTime + (t / 1000) * tempoRate,
