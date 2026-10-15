@@ -67,8 +67,13 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
   const hitsRef = useRef<HTMLSpanElement>(null);
   const metronomeRef = useRef<Metronome | null>(null);
   const endRef = useRef<() => void>(() => {});
+  const restartRef = useRef<() => void>(() => {});
   const callbacks = useRef({ onRun, onEnd });
   const [metronomeOn, setMetronomeOn] = useState(config.metronome);
+  const metronomeOnRef = useRef(metronomeOn);
+  // Every run recorded since practice began. A restart keeps them and starts the transport again.
+  const recordedRef = useRef<Run[]>([]);
+  const [restarts, setRestarts] = useState(0);
 
   useEffect(() => {
     callbacks.current = { onRun, onEnd };
@@ -129,7 +134,10 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
       pass.startedAtPerf +
       ((rangeEnd - originTime) / rate) * 1000 +
       (pass.gate?.holds.reduce((sum, h) => sum + h.ms, 0) ?? 0);
-    let current = newPass(1, performance.now() + LEAD_MS);
+    // After a restart, loop passes carry on numbering from the ones already recorded.
+    const recorded = recordedRef.current;
+    const firstPass = recorded.length + 1;
+    let current = newPass(firstPass, performance.now() + LEAD_MS);
     // Around the loop point: the pass before, while a late final note can still
     // count there, and the next pass, so an early first note counts there.
     let previous: Pass | null = null;
@@ -155,14 +163,13 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
         ...clicksFor(current.startedAtPerf, true),
         ...(config.loop && !config.wait ? clicksFor(current.startedAtPerf + loopMs, false) : []),
       ],
-      config.metronome && !config.wait,
+      metronomeOnRef.current && !config.wait,
       getMetronomeOffset(),
     );
     metronomeRef.current = metronome;
     metronome.start();
 
     // ---- Ending passes ----
-    const recorded: Run[] = [];
     const finishPass = (pass: Pass, perf: number, completed: boolean) => {
       if (pass.done) return;
       pass.done = true;
@@ -204,8 +211,18 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
       callbacks.current.onEnd(recorded);
     };
     endRef.current = () => end(false);
+    // Starting again throws away the pass being played, so it never counts as a run.
+    // A loop pass that already reached the end is complete, so it is kept.
+    const restart = () => {
+      if (ended) return;
+      ended = true;
+      if (previous) finishPass(previous, performance.now(), true);
+      setRestarts((n) => n + 1);
+    };
+    restartRef.current = restart;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') end(false);
+      else if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey && !e.altKey) restart();
     };
     window.addEventListener('keydown', onKeyDown);
 
@@ -397,7 +414,7 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
       g.fillRect(0, hitY - 2, width, 3);
 
       // Count-in: show the beat being counted.
-      if (current.number === 1 && songTime < rangeStart) {
+      if (current.number === firstPass && songTime < rangeStart) {
         const begun = countInBeats.filter((b) => b.time - countIn <= songTime).length;
         g.fillStyle = COLOR.snow;
         g.font = `120px ${displayFont}`;
@@ -449,11 +466,12 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
       unsubscribe();
       metronome.stop();
     };
-  }, [song, source, userId, config]);
+  }, [song, source, userId, config, restarts]);
 
   const toggleMetronome = () => {
     const next = !metronomeOn;
     setMetronomeOn(next);
+    metronomeOnRef.current = next;
     if (metronomeRef.current) metronomeRef.current.enabled = next;
   };
 
@@ -475,6 +493,9 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
               Metronome {metronomeOn ? 'on' : 'off'}
             </button>
           )}
+          <button type="button" className="btn" onClick={() => restartRef.current()}>
+            Restart (R)
+          </button>
           <button type="button" className="btn btn-primary" onClick={() => endRef.current()}>
             End (Esc)
           </button>
