@@ -12,6 +12,8 @@ export type Note = {
   duration: number;
   track: number;
   measure: number;
+  /** Shown on the note as it falls, such as the finger to play it with. Only drills add these. */
+  annotation?: string;
 };
 
 export type Beat = {

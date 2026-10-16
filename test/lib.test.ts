@@ -8,6 +8,7 @@ import { chordProgressions } from '../app/lib/drills/chordProgressions.ts';
 import { randomNotes } from '../app/lib/drills/randomNotes.ts';
 import { scales } from '../app/lib/drills/scales.ts';
 import { resolveConfig } from '../app/lib/drills/fields.ts';
+import { fingeredLine } from '../app/lib/drills/fingering.ts';
 import { seededRng } from '../app/lib/drills/random.ts';
 import { drills } from '../app/lib/drills/registry.ts';
 import { KEY_NAMES, diatonicChord, isWhite, numeral, parseNumerals } from '../app/lib/drills/theory.ts';
@@ -447,4 +448,50 @@ test('random triads are major or minor and named for their root', () => {
     const third = tag.chord.endsWith('major') ? 4 : 3;
     assert.deepEqual(new Set(pcs), new Set([root, (root + third) % 12, (root + 7) % 12]), tag.chord);
   }
+});
+
+test('scales are fingered the standard way in every major and harmonic minor key', () => {
+  const MAJOR = [0, 2, 4, 5, 7, 9, 11];
+  const HARMONIC = [0, 2, 3, 5, 7, 8, 11];
+  const fingers = (key: string, steps: number[], hand: 'right' | 'left') =>
+    fingeredLine((hand === 'right' ? 60 : 48) + KEY_NAMES.indexOf(key), 1, steps, steps, 'up', hand)
+      .map((n) => n.finger)
+      .join('');
+  // One octave up from the tonic, right hand then left.
+  const major: Record<string, [string, string]> = {
+    C: ['12312345', '54321321'], G: ['12312345', '54321321'], D: ['12312345', '54321321'],
+    A: ['12312345', '54321321'], E: ['12312345', '54321321'], B: ['12312345', '43214321'],
+    'F#': ['23412312', '43213214'], Db: ['23123412', '32143213'], Ab: ['34123123', '32143213'],
+    Eb: ['31234123', '32143213'], Bb: ['41231234', '32143213'], F: ['12341234', '54321321'],
+  };
+  const minor: Record<string, [string, string]> = {
+    A: ['12312345', '54321321'], E: ['12312345', '54321321'], B: ['12312345', '43214321'],
+    'F#': ['34123123', '43213214'], Db: ['34123123', '32143213'], Ab: ['34123123', '32143213'],
+    Eb: ['31234123', '21432132'], Bb: ['41231234', '21321432'], F: ['12341234', '54321321'],
+    C: ['12312345', '54321321'], G: ['12312345', '54321321'], D: ['12312345', '54321321'],
+  };
+  for (const [key, [right, left]] of Object.entries(major)) {
+    assert.equal(fingers(key, MAJOR, 'right'), right, `${key} major right hand`);
+    assert.equal(fingers(key, MAJOR, 'left'), left, `${key} major left hand`);
+  }
+  for (const [key, [right, left]] of Object.entries(minor)) {
+    assert.equal(fingers(key, HARMONIC, 'right'), right, `${key} harmonic minor right hand`);
+    assert.equal(fingers(key, HARMONIC, 'left'), left, `${key} harmonic minor left hand`);
+  }
+});
+
+test('the scales drill puts a finger on every note, turning at the top on the fifth finger', () => {
+  const config = resolveConfig(scales, { keys: ['C'], octaves: 2, direction: 'up-down' });
+  const exercise = scales.generate(config, seededRng(1));
+  const right = exercise.notes.filter((n) => n.track === 0).map((n) => n.annotation).join('');
+  assert.equal(right, '12312341231234543213214321321');
+  assert.ok(exercise.notes.every((n) => n.annotation));
+});
+
+test('chromatic scales keep the thumb on white keys and 3 on black', () => {
+  const chromatic = Array.from({ length: 12 }, (_, i) => i);
+  const run = (hand: 'right' | 'left') =>
+    fingeredLine(60, 1, chromatic, chromatic, 'up', hand).map((n) => n.finger).join('');
+  assert.equal(run('right'), '1313123131312');
+  assert.equal(run('left'), '1313213131321');
 });

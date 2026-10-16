@@ -1,6 +1,7 @@
-import { directionField, keyName, keysField, layLines, line, noteValueField, NOTE_VALUES, octavesField, orderField, orderKeys, placeRun } from './common.ts';
+import { directionField, keyName, keysField, layLines, noteValueField, NOTE_VALUES, octavesField, orderField, orderKeys, placeRun } from './common.ts';
 import type { BeatNote } from './exercise.ts';
 import { buildExercise } from './exercise.ts';
+import { fingeredLine } from './fingering.ts';
 import { tonicOf } from './theory.ts';
 import type { DrillDefinition } from './types';
 
@@ -48,7 +49,8 @@ const preset = (config: Partial<Config>): Config => ({
 export const scales: DrillDefinition<Config> = {
   id: 'scales',
   name: 'Scales',
-  description: 'Scales up and down in the keys you choose, hands together an octave apart or in contrary motion.',
+  description:
+    'Scales up and down in the keys you choose, hands together an octave apart or in contrary motion, with the fingering on each note.',
   version: 1,
   fields: [
     keysField('keys'),
@@ -104,15 +106,21 @@ export const scales: DrillDefinition<Config> = {
         const scale = SCALES[id];
         // The right hand from near middle C, kept below C8.
         const right = placeRun(tonicOf(key), 12 * octaves, 60, 108);
-        const lines = [
-          { part: 0, pitches: line(right, octaves, scale.up, scale.down, config.direction) },
+        const hands = [
+          { part: 0, run: fingeredLine(right, octaves, scale.up, scale.down, config.direction, 'right') },
           {
             part: 1,
-            pitches: contrary
-              ? line(right - 12 - 12 * octaves, octaves, scale.up, scale.down, CONTRARY[config.direction])
-              : line(right - 12, octaves, scale.up, scale.down, config.direction),
+            run: contrary
+              ? fingeredLine(right - 12 - 12 * octaves, octaves, scale.up, scale.down, CONTRARY[config.direction], 'left')
+              : fingeredLine(right - 12, octaves, scale.up, scale.down, config.direction, 'left'),
           },
         ];
+        // Each note shows the finger to play it with.
+        const lines = hands.map(({ part, run }) => ({
+          part,
+          pitches: run.map((n) => n.pitch),
+          annotations: run.map((n) => String(n.finger)),
+        }));
         const measures = layLines(notes, lines, tags.length * BEATS, value, BEATS);
         for (let i = 0; i < measures; i++) tags.push({ key: keyName(key), scale: scale.label });
       }
