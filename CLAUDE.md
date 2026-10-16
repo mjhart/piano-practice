@@ -22,7 +22,8 @@ Next.js 15 static export (no server). See README.md for what it does.
 - `app/lib/drills/`: built-in drills. Each is a `DrillDefinition` (settings
   fields, defaults, presets, a pure `generate(config, rng)`) listed in
   `registry.ts`. `resolveConfig` makes any settings safe; `theory.ts` and
-  `exercise.ts` are shared helpers. Drills write at `REFERENCE_BPM`; the tempo
+  `exercise.ts` are shared helpers. A drill can put an `annotation` on a note
+  (the scales drill puts fingers from `fingering.ts`), drawn on it as it falls. Drills write at `REFERENCE_BPM`; the tempo
   control sets the rate.
 - `app/lib/store/`: `PracticeStore` is the only way to read or write practice
   data. `IndexedDbStore` is the one implementation, chosen in `index.ts`. A

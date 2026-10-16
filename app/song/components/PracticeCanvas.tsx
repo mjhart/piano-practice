@@ -56,6 +56,8 @@ const RIDGE = [
 
 /** Real seconds between a note appearing at the top and reaching the keys. */
 const FALL_SECONDS = 3;
+/** The smallest annotation text; on narrower keys it goes on a tab wider than the note. */
+const MIN_ANNOTATION_PX = 11;
 /** Real milliseconds of quiet before the count-in, so the first click is never clipped. */
 const LEAD_MS = 300;
 
@@ -353,7 +355,11 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
         }
       }
 
-      // Falling notes.
+      // Falling notes, with annotations sized to fit across them.
+      const annotationSize = (p: number) => Math.min(16, Math.floor(keyWidth(p) - (isBlack(p) ? 2 : 6)));
+      let font = '';
+      g.textAlign = 'center';
+      g.textBaseline = 'bottom';
       for (const { offset, matcher } of layers) {
         for (const n of notes) {
           const start = n.start + offset;
@@ -375,9 +381,29 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
             g.lineWidth = 2;
             g.stroke();
           }
+          // An annotation, such as a finger number, sits at the note's leading edge, which reaches the keys
+          // first. On keys too narrow to hold it, it sits on a round tab as wide as it needs.
+          if (n.annotation && bottom - top >= 14) {
+            const inside = annotationSize(n.pitch);
+            const size = Math.max(inside, MIN_ANNOTATION_PX);
+            const wanted = `600 ${size}px ${bodyFont}`;
+            if (font !== wanted) g.font = font = wanted;
+            const x = keyX(n.pitch) + keyWidth(n.pitch) / 2;
+            if (inside < MIN_ANNOTATION_PX) {
+              g.beginPath();
+              g.arc(x, bottom - size / 2 - 3, size / 2 + 3, 0, Math.PI * 2);
+              g.fill();
+              if (missed) g.stroke();
+            }
+            g.globalAlpha = 1;
+            g.fillStyle = missed ? COLOR.haze : COLOR.night;
+            g.fillText(n.annotation, x, bottom - 3);
+          }
         }
       }
       g.globalAlpha = 1;
+      g.textAlign = 'start';
+      g.textBaseline = 'alphabetic';
       g.restore();
 
       // While the song waits, mark the keys it is waiting for.

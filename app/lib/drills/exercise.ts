@@ -7,7 +7,7 @@ import type { Beat, Exercise, Measure, Note, TrackInfo } from '../../types';
 export const REFERENCE_BPM = 60;
 
 /** A note in beats from the start of the exercise. `part` indexes the parts list. */
-export type BeatNote = { part: number; pitch: number; beat: number; beats: number; velocity?: number };
+export type BeatNote = { part: number; pitch: number; beat: number; beats: number; velocity?: number; annotation?: string };
 
 type Spec = {
   /** Part names, such as ['Right hand', 'Left hand']. Each becomes a track. */
@@ -44,6 +44,7 @@ export function buildExercise({ parts, beatsPerMeasure, notes, tags }: Spec): Ex
     track: n.part,
     // Triplets add up to a whole beat only roughly, so allow a hair of rounding.
     measure: Math.min(Math.floor(n.beat / beatsPerMeasure + 1e-9), measures.length - 1),
+    ...(n.annotation === undefined ? {} : { annotation: n.annotation }),
   }));
   const tracks: TrackInfo[] = parts.map((name, index) => ({
     index,

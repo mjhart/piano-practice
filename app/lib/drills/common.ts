@@ -86,13 +86,14 @@ export function line(bottom: number, octaves: number, up: number[], down: number
 }
 
 /**
- * Lays parts that play together, one note per `value` beats, from `beat`. The
- * last note of each part is held to the end of the measure. Returns the
- * number of measures used.
+ * Lays parts that play together, one note per `value` beats, from `beat`,
+ * with an annotation (such as a finger) on each note if given. The last note
+ * of each part is held to the end of the measure. Returns the number of
+ * measures used.
  */
 export function layLines(
   notes: BeatNote[],
-  lines: { part: number; pitches: number[] }[],
+  lines: { part: number; pitches: number[]; annotations?: string[] }[],
   beat: number,
   value: number,
   beatsPerMeasure: number,
@@ -100,10 +101,11 @@ export function layLines(
   const length = Math.max(...lines.map((l) => l.pitches.length));
   const measures = Math.max(1, Math.ceil((length * value - 1e-9) / beatsPerMeasure));
   const end = beat + measures * beatsPerMeasure;
-  for (const { part, pitches } of lines) {
+  for (const { part, pitches, annotations } of lines) {
     pitches.forEach((pitch, i) => {
       const at = beat + i * value;
-      notes.push({ part, pitch, beat: at, beats: i === pitches.length - 1 ? end - at : value });
+      const annotation = annotations?.[i];
+      notes.push({ part, pitch, beat: at, beats: i === pitches.length - 1 ? end - at : value, ...(annotation ? { annotation } : {}) });
     });
   }
   return measures;
