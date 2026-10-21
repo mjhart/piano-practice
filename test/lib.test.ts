@@ -12,6 +12,7 @@ import { fingeredLine } from '../app/lib/drills/fingering.ts';
 import { seededRng } from '../app/lib/drills/random.ts';
 import { drills } from '../app/lib/drills/registry.ts';
 import { KEY_NAMES, diatonicChord, isWhite, numeral, parseNumerals } from '../app/lib/drills/theory.ts';
+import { defaultDuelLayout, duelLayouts, duelOutcome, duelRange, duelSplit } from '../app/lib/duel.ts';
 import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, scoreByTag, scoreRun } from '../app/lib/scoring.ts';
 import { upgradeRun } from '../app/lib/sources.ts';
 import { defaultSettings, resolveSettings } from '../app/lib/settings.ts';
@@ -494,4 +495,36 @@ test('chromatic scales keep the thumb on white keys and 3 on black', () => {
     fingeredLine(60, 1, chromatic, chromatic, 'up', hand).map((n) => n.finger).join('');
   assert.equal(run('right'), '1313123131312');
   assert.equal(run('left'), '1313213131321');
+});
+
+test('a duel puts the part twice on the keyboard, whole octaves apart without sharing a key', () => {
+  // C4 to G4 fits in an octave, so the copies go one octave apart.
+  const pitches = [60, 64, 67];
+  const layouts = duelLayouts(pitches);
+  assert.ok(layouts.every((l) => l.high - l.low === 12));
+  assert.ok(layouts.every((l) => 60 + l.low >= 21 && 67 + l.high <= 108));
+  assert.deepEqual(defaultDuelLayout(layouts), { low: -12, high: 0 });
+  assert.equal(duelRange(pitches, -12), 'C3–G3');
+  // Keys up to the gap's middle belong to the low end.
+  assert.equal(duelSplit(pitches, { low: -12, high: 0 }), 58);
+  // An octave and a bit needs two octaves between the copies; five octaves can't fit twice.
+  assert.ok(duelLayouts([60, 74]).every((l) => l.high - l.low === 24));
+  assert.deepEqual(duelLayouts([36, 96]), []);
+});
+
+test('a duel run is scored against the part moved into its octaves', () => {
+  const score = scoreRun(song(), run({ transpose: -12, events: [on(2000, 48), on(2000, 60), on(4000, 55)] }));
+  // C3 and G3 hit; C4 is where the part is written, so for this player it is a wrong note.
+  assert.equal(score.hits, 2);
+  assert.equal(score.extras, 1);
+  assert.equal(expectedNotes(song(), run({ transpose: 12 }))[0].pitch, 72);
+});
+
+test('a duel is won on accuracy, then hits, then timing', () => {
+  const score = (accuracy: number | null, hits: number, meanAbsErrorMs: number | null) =>
+    ({ accuracy, hits, misses: 0, extras: 0, meanAbsErrorMs, meanErrorMs: null, measures: [] });
+  assert.deepEqual(duelOutcome(score(0.9, 9, 30), score(0.8, 10, 10)), { winner: 0, by: 'accuracy' });
+  assert.deepEqual(duelOutcome(score(0.9, 9, 30), score(0.9, 10, 40)), { winner: 1, by: 'hits' });
+  assert.deepEqual(duelOutcome(score(0.9, 9, 30), score(0.9, 9, 20)), { winner: 1, by: 'timing' });
+  assert.deepEqual(duelOutcome(score(null, 0, null), score(null, 0, null)), { winner: null, by: null });
 });

@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Metronome, type Click } from '../../lib/metronome';
 import { subscribeNotes } from '../../lib/midiInput';
 import { getMetronomeOffset } from '../../lib/prefs';
+import { duelSplit, type DuelLayout } from '../../lib/duel';
 import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, songTimeOf } from '../../lib/scoring';
 import { sourceKeyOf, tempoText } from '../../lib/sources';
-import type { Exercise, PlayedEvent, Run, RunSource, SongModel } from '../../types';
+import type { Exercise, Note, PlayedEvent, Run, RunSource, SongModel, User } from '../../types';
 
 export type PracticeConfig = {
   tracks: number[];
@@ -18,13 +19,22 @@ export type PracticeConfig = {
   wait: boolean;
   /** Play the section over and over until stopped. Each pass is recorded as its own run. */
   loop: boolean;
+  /**
+   * Two players at one keyboard, each playing the parts in their own octaves.
+   * Each is recorded as their own run. Wait and loop are off in a duel.
+   */
+  duel?: {
+    /** The player at the low end, then the one at the high end. */
+    players: [User, User];
+    layout: DuelLayout;
+  };
 };
 
 type Props = {
   song: SongModel;
   /** What is being played, recorded on every run. For a drill, `song` is its exercise. */
   source: RunSource;
-  /** Who is playing; every run recorded belongs to them. */
+  /** Who is playing; every run recorded belongs to them, except in a duel. */
   userId: string;
   config: PracticeConfig;
   /** A run was recorded: the whole section, or one pass of a loop. */
@@ -86,6 +96,20 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
     const g = canvas.getContext('2d')!;
     const rate = config.tempoRate;
     const notes = expectedNotes(song, config);
+    const { duel } = config;
+
+    // ---- Players: one, or in a duel two, each with the parts in their own octaves ----
+    // A note played belongs to whichever side of the split it is on.
+    type Player = { user: string; transpose: number; side?: 'low' | 'high'; notes: Note[] };
+    const players: Player[] = duel
+      ? [
+          { user: duel.players[0].id, transpose: duel.layout.low, side: 'low' as const },
+          { user: duel.players[1].id, transpose: duel.layout.high, side: 'high' as const },
+        ].map((p) => ({ ...p, notes: expectedNotes(song, { ...config, transpose: p.transpose }) }))
+      : [{ user: userId, transpose: 0, notes }];
+    const split = duel && notes.length ? duelSplit(notes.map((n) => n.pitch), duel.layout) : Infinity;
+    const playerOf = (pitch: number) => (pitch >= split ? players.length - 1 : 0);
+    const duelId = crypto.randomUUID();
     const first = song.measures[config.startMeasure];
     const rangeStart = first.start;
     const rangeEnd = song.measures[config.endMeasure].end;
@@ -105,25 +129,25 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
     // is stored as an ordinary run. When looping, each pass's clock reaches the
     // start of the section just as the one before reaches the end, as if it had
     // counted in over the last measure, so the music runs on.
+    // Each player has their own matcher and events in a pass, by index in `players`.
+    type Side = { matcher: Matcher; events: PlayedEvent[] };
     type Pass = {
       number: number;
       startedAtPerf: number;
       startedAt: number;
-      matcher: Matcher;
-      // In wait mode the clock stops at each note until the matcher pairs it.
+      sides: Side[];
+      // In wait mode the clock stops at each note until the matcher pairs it. Never in a duel.
       gate: WaitGate | null;
-      events: PlayedEvent[];
       done: boolean;
     };
     const newPass = (number: number, startedAtPerf: number): Pass => {
-      const matcher = new Matcher(notes, DEFAULT_TOLERANCE_MS, rate, rangeStart);
+      const sides = players.map((p) => ({ matcher: new Matcher(p.notes, DEFAULT_TOLERANCE_MS, rate, rangeStart), events: [] }));
       return {
         number,
         startedAtPerf,
         startedAt: Date.now() + (startedAtPerf - performance.now()),
-        matcher,
-        gate: config.wait ? new WaitGate(notes, matcher, originTime, rate) : null,
-        events: [],
+        sides,
+        gate: config.wait && !duel ? new WaitGate(notes, sides[0].matcher, originTime, rate) : null,
         done: false,
       };
     };
@@ -179,27 +203,31 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
       pass.gate?.update(perf - pass.startedAtPerf, true);
       // Ended before the first measure began: nothing to record.
       if (reachedTime <= rangeStart) return;
-      const run: Run = {
-        id: crypto.randomUUID(),
-        source,
-        sourceKey: sourceKeyOf(source),
-        userId,
-        startedAt: pass.startedAt,
-        startMeasure: config.startMeasure,
-        endMeasure: config.endMeasure,
-        tempoRate: rate,
-        tracks: config.tracks,
-        metronome: config.metronome && !config.wait,
-        ...(pass.gate && { wait: true, holds: pass.gate.holds }),
-        ...(config.loop && { pass: pass.number }),
-        toleranceMs: DEFAULT_TOLERANCE_MS,
-        originTime,
-        reachedTime,
-        completed,
-        events: pass.events,
-      };
-      recorded.push(run);
-      callbacks.current.onRun(run);
+      players.forEach((player, i) => {
+        const run: Run = {
+          id: crypto.randomUUID(),
+          source,
+          sourceKey: sourceKeyOf(source),
+          userId: player.user,
+          startedAt: pass.startedAt,
+          startMeasure: config.startMeasure,
+          endMeasure: config.endMeasure,
+          tempoRate: rate,
+          tracks: config.tracks,
+          metronome: config.metronome && !config.wait,
+          ...(pass.gate && { wait: true, holds: pass.gate.holds }),
+          ...(config.loop && { pass: pass.number }),
+          ...(player.transpose && { transpose: player.transpose }),
+          ...(player.side && { duel: { id: duelId, opponentId: players[1 - i].user, side: player.side } }),
+          toleranceMs: DEFAULT_TOLERANCE_MS,
+          originTime,
+          reachedTime,
+          completed,
+          events: pass.sides[i].events,
+        };
+        recorded.push(run);
+        callbacks.current.onRun(run);
+      });
     };
 
     let ended = false;
@@ -256,6 +284,7 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
       else held.delete(e.pitch);
       if (ended) return;
       advance(e.timeStamp);
+      const side = playerOf(e.pitch);
       // A note belongs to the pass being played, unless it only pairs with a
       // note in the one before or after: a late last note or an early first one.
       const neighbour = [previous, next].find(
@@ -263,20 +292,20 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
           p &&
           !p.done &&
           e.on &&
-          !current.matcher.wouldMatch(songTimeAt(current, e.timeStamp), e.pitch) &&
-          p.matcher.wouldMatch(songTimeAt(p, e.timeStamp), e.pitch),
+          !current.sides[side].matcher.wouldMatch(songTimeAt(current, e.timeStamp), e.pitch) &&
+          p.sides[side].matcher.wouldMatch(songTimeAt(p, e.timeStamp), e.pitch),
       );
       const pass = neighbour ?? current;
       const t = e.timeStamp - pass.startedAtPerf;
       if (t < 0) return;
-      pass.events.push({ t, pitch: e.pitch, velocity: e.velocity, on: e.on });
+      pass.sides[side].events.push({ t, pitch: e.pitch, velocity: e.velocity, on: e.on });
       if (!e.on) return;
-      pass.matcher.noteOn(songTimeAt(pass, e.timeStamp), e.pitch);
+      pass.sides[side].matcher.noteOn(songTimeAt(pass, e.timeStamp), e.pitch);
       pass.gate?.update(t);
     });
 
     // ---- Keyboard geometry: whole octaves around the notes in play ----
-    const pitches = notes.map((n) => n.pitch);
+    const pitches = players.flatMap((p) => p.notes.map((n) => n.pitch));
     const lowest = pitches.length ? Math.min(...pitches) : 60;
     const highest = pitches.length ? Math.max(...pitches) : 72;
     const lo = Math.floor((lowest - 2) / 12) * 12;
@@ -334,10 +363,10 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
 
       // What is on screen, in this pass's song time: this pass, the tail of the
       // one before, and when looping, the passes still to come.
-      const layers: { offset: number; matcher: Matcher | null }[] = [{ offset: 0, matcher: current.matcher }];
-      if (previous) layers.push({ offset: -loopLength, matcher: previous.matcher });
+      const layers: { offset: number; pass: Pass | null }[] = [{ offset: 0, pass: current }];
+      if (previous) layers.push({ offset: -loopLength, pass: previous });
       for (let k = 1; config.loop && loopLength > 0 && rangeStart + k * loopLength <= songTime + windowSec; k++) {
-        layers.push({ offset: k * loopLength, matcher: k === 1 ? (next?.matcher ?? null) : null });
+        layers.push({ offset: k * loopLength, pass: k === 1 ? next : null });
       }
 
       // Beat and measure lines.
@@ -360,44 +389,47 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
       let font = '';
       g.textAlign = 'center';
       g.textBaseline = 'bottom';
-      for (const { offset, matcher } of layers) {
-        for (const n of notes) {
-          const start = n.start + offset;
-          if (start > songTime + windowSec) break;
-          if (start + n.duration < songTime - windowSec) continue;
-          const top = y(start + n.duration);
-          const bottom = y(start);
-          const hit = matcher?.matched.has(n.id) ?? false;
-          const missed = matcher !== null && !hit && start < songTime - tolSec;
-          if (hit) g.fillStyle = COLOR.snow;
-          else if (missed) g.fillStyle = COLOR.night;
-          else g.fillStyle = trackColor.get(n.track) ?? COLOR.gold;
-          g.globalAlpha = isBlack(n.pitch) ? 0.8 : 1;
-          g.beginPath();
-          g.roundRect(keyX(n.pitch) + 2, top + 1, keyWidth(n.pitch) - 4, Math.max(bottom - top, 6) - 2, 2);
-          g.fill();
-          if (missed) {
-            g.strokeStyle = COLOR.haze;
-            g.lineWidth = 2;
-            g.stroke();
-          }
-          // An annotation, such as a finger number, sits at the note's leading edge, which reaches the keys
-          // first. On keys too narrow to hold it, it sits on a round tab as wide as it needs.
-          if (n.annotation && bottom - top >= 14) {
-            const inside = annotationSize(n.pitch);
-            const size = Math.max(inside, MIN_ANNOTATION_PX);
-            const wanted = `600 ${size}px ${bodyFont}`;
-            if (font !== wanted) g.font = font = wanted;
-            const x = keyX(n.pitch) + keyWidth(n.pitch) / 2;
-            if (inside < MIN_ANNOTATION_PX) {
-              g.beginPath();
-              g.arc(x, bottom - size / 2 - 3, size / 2 + 3, 0, Math.PI * 2);
-              g.fill();
-              if (missed) g.stroke();
+      for (const { offset, pass } of layers) {
+        for (const [i, player] of players.entries()) {
+          const matcher = pass?.sides[i].matcher ?? null;
+          for (const n of player.notes) {
+            const start = n.start + offset;
+            if (start > songTime + windowSec) break;
+            if (start + n.duration < songTime - windowSec) continue;
+            const top = y(start + n.duration);
+            const bottom = y(start);
+            const hit = matcher?.matched.has(n.id) ?? false;
+            const missed = matcher !== null && !hit && start < songTime - tolSec;
+            if (hit) g.fillStyle = COLOR.snow;
+            else if (missed) g.fillStyle = COLOR.night;
+            else g.fillStyle = trackColor.get(n.track) ?? COLOR.gold;
+            g.globalAlpha = isBlack(n.pitch) ? 0.8 : 1;
+            g.beginPath();
+            g.roundRect(keyX(n.pitch) + 2, top + 1, keyWidth(n.pitch) - 4, Math.max(bottom - top, 6) - 2, 2);
+            g.fill();
+            if (missed) {
+              g.strokeStyle = COLOR.haze;
+              g.lineWidth = 2;
+              g.stroke();
             }
-            g.globalAlpha = 1;
-            g.fillStyle = missed ? COLOR.haze : COLOR.night;
-            g.fillText(n.annotation, x, bottom - 3);
+            // An annotation, such as a finger number, sits at the note's leading edge, which reaches the keys
+            // first. On keys too narrow to hold it, it sits on a round tab as wide as it needs.
+            if (n.annotation && bottom - top >= 14) {
+              const inside = annotationSize(n.pitch);
+              const size = Math.max(inside, MIN_ANNOTATION_PX);
+              const wanted = `600 ${size}px ${bodyFont}`;
+              if (font !== wanted) g.font = font = wanted;
+              const x = keyX(n.pitch) + keyWidth(n.pitch) / 2;
+              if (inside < MIN_ANNOTATION_PX) {
+                g.beginPath();
+                g.arc(x, bottom - size / 2 - 3, size / 2 + 3, 0, Math.PI * 2);
+                g.fill();
+                if (missed) g.stroke();
+              }
+              g.globalAlpha = 1;
+              g.fillStyle = missed ? COLOR.haze : COLOR.night;
+              g.fillText(n.annotation, x, bottom - 3);
+            }
           }
         }
       }
@@ -439,6 +471,23 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
       g.fillStyle = COLOR.snow;
       g.fillRect(0, hitY - 2, width, 3);
 
+      // In a duel, a line down the middle and each player's name and hits on their side of it.
+      if (duel && split !== Infinity) {
+        const splitX = (whiteIndex.get(split)! + (isBlack(split) ? 1 : 0)) * whiteWidth;
+        g.fillStyle = COLOR.rule;
+        g.fillRect(splitX - 1, 0, 2, hitY);
+        g.font = `600 16px ${bodyFont}`;
+        g.textAlign = 'center';
+        duel.players.forEach((user, i) => {
+          const x = i === 0 ? splitX / 2 : (splitX + width) / 2;
+          g.fillStyle = COLOR.snow;
+          g.fillText(user.name, x, 28);
+          g.fillStyle = COLOR.gold;
+          g.fillText(`${current.sides[i].matcher.matched.size} hit`, x, 50);
+        });
+        g.textAlign = 'start';
+      }
+
       // Count-in: show the beat being counted.
       if (current.number === firstPass && songTime < rangeStart) {
         const begun = countInBeats.filter((b) => b.time - countIn <= songTime).length;
@@ -479,9 +528,10 @@ export function PracticeCanvas({ song, source, userId, config, onRun, onEnd }: P
         positionRef.current.textContent =
           `Measure ${measure + 1} of ${config.startMeasure + 1}–${config.endMeasure + 1}` +
           (config.loop ? ` · pass ${current.number}` : '') +
+          (duel ? ` · ${duel.players[0].name} vs ${duel.players[1].name}` : '') +
           (waiting ? ' · waiting for you' : '');
       }
-      if (hitsRef.current) hitsRef.current.textContent = `${current.matcher.matched.size} hit`;
+      if (hitsRef.current && !duel) hitsRef.current.textContent = `${current.sides[0].matcher.matched.size} hit`;
     };
     frame = requestAnimationFrame(draw);
 
