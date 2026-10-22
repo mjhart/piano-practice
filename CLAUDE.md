@@ -19,6 +19,10 @@ Next.js 15 static export (no server). See README.md for what it does.
   which flattens a file into notes, beats and measures in seconds.
 - `app/lib/scoring.ts`: `Matcher` pairs played notes with expected notes. It is
   used live in the canvas and again by `scoreRun`, so the two always agree.
+- `app/lib/duel.ts`: duel mode, two players at one keyboard. Picks the octaves
+  each end plays the part in, where the keyboard splits, and who won. Each side
+  is saved as its own `Run` with `transpose` (which `expectedNotes` applies) and
+  a `duel` linking it to the other side's run.
 - `app/lib/drills/`: built-in drills. Each is a `DrillDefinition` (settings
   fields, defaults, presets, a pure `generate(config, rng)`) listed in
   `registry.ts`. `resolveConfig` makes any settings safe; `theory.ts` and

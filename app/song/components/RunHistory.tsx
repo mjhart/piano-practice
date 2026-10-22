@@ -13,9 +13,11 @@ type Props = {
   onOpen: (run: Run) => void;
   /** Says what was played, for a history that mixes different exercises. */
   describe?: (run: Run) => string;
+  /** A player's name, for a duel's opponent. */
+  nameOf: (userId: string) => string;
 };
 
-export function RunHistory({ runs, scores, onOpen, describe }: Props) {
+export function RunHistory({ runs, scores, onOpen, describe, nameOf }: Props) {
   if (runs.length === 0) return <p className="text-sm text-haze">No practice runs yet.</p>;
   return (
     <ul className="divide-y divide-rule">
@@ -42,6 +44,7 @@ export function RunHistory({ runs, scores, onOpen, describe }: Props) {
                 {tempoText(run.source, run.tempoRate).replace(' tempo', '')}
                 {run.wait ? ', waiting for each note' : ''}
                 {run.pass ? `, loop pass ${run.pass}` : ''}
+                {run.duel ? `, duel with ${nameOf(run.duel.opponentId)}` : ''}
                 {run.completed ? '' : ' (ended early)'}
               </span>
               <span className="text-haze">

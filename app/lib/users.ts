@@ -57,10 +57,12 @@ export function selectUser(id: string): Promise<void> {
   return reloadUsers(id);
 }
 
-export async function addUser(name: string): Promise<void> {
+/** Adds a player and, unless `select` is false, makes them the current one. */
+export async function addUser(name: string, select = true): Promise<User> {
   const user: User = { id: crypto.randomUUID(), name, addedAt: Date.now() };
   await store.putUser(user);
-  await reloadUsers(user.id);
+  await reloadUsers(select ? user.id : undefined);
+  return user;
 }
 
 export async function renameUser(user: User, name: string): Promise<void> {

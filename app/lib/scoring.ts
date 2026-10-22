@@ -23,14 +23,16 @@ export type RunScore = {
   measures: MeasureScore[];
 };
 
-type Selection = Pick<Run, 'tracks' | 'startMeasure' | 'endMeasure'>;
+type Selection = Pick<Run, 'tracks' | 'startMeasure' | 'endMeasure' | 'transpose'>;
 
-/** The notes the player is expected to play, in start order. */
+/** The notes the player is expected to play, in start order, moved by `transpose` semitones. */
 export function expectedNotes(song: SongModel, sel: Selection): Note[] {
   const tracks = new Set(sel.tracks);
-  return song.notes.filter(
+  const notes = song.notes.filter(
     (n) => tracks.has(n.track) && n.measure >= sel.startMeasure && n.measure <= sel.endMeasure,
   );
+  const shift = sel.transpose ?? 0;
+  return shift ? notes.map((n) => ({ ...n, pitch: n.pitch + shift })) : notes;
 }
 
 type Clock = Pick<Run, 'originTime' | 'tempoRate' | 'holds'>;

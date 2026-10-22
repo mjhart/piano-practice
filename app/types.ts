@@ -136,6 +136,15 @@ export type RunSource =
       exercise: Exercise;
     };
 
+export type Duel = {
+  /** Shared by the two runs of one duel. */
+  id: string;
+  /** Who played the other side. */
+  opponentId: string;
+  /** Which end of the keyboard this player had. */
+  side: 'low' | 'high';
+};
+
 export type Run = {
   id: string;
   source: RunSource;
@@ -160,6 +169,13 @@ export type Run = {
    * own run. Absent when the section was played once.
    */
   pass?: number;
+  /**
+   * Semitones every expected note was moved, so a duel player could play the
+   * part in their own octaves. Absent means as written.
+   */
+  transpose?: number;
+  /** Set on both runs of a duel: two players at one keyboard, each in their own octaves. */
+  duel?: Duel;
   toleranceMs: number;
   /**
    * Song time at t = 0, so songTime = originTime + (t / 1000) * tempoRate,
