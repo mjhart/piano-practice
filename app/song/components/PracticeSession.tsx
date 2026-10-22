@@ -36,6 +36,8 @@ type Props = {
   source: RunSource;
   /** Inclusive measure indexes of the part that can be practised. */
   trim: Range;
+  /** The section to open on, such as one picked out on the statistics page. Clamped to `trim`. */
+  initialRange?: Range;
   initialTracks: number[];
   initialTempoRate: number;
   tempo: { min: number; max: number; step: number; label: (rate: number) => ReactNode };
@@ -64,7 +66,12 @@ export function PracticeSession(props: Props) {
   const [mode, setMode] = useState<Mode>({ kind: 'setup' });
 
   const [tracks, setTracks] = useState<number[]>(props.initialTracks);
-  const [range, setRange] = useState<Range>(trim);
+  const opening = (): Range => {
+    const [from, to] = props.initialRange ?? trim;
+    const clamp = (m: number) => Math.min(Math.max(m, trim[0]), trim[1]);
+    return [clamp(Math.min(from, to)), clamp(Math.max(from, to))];
+  };
+  const [range, setRange] = useState<Range>(opening);
   const [tempoRate, setTempoRate] = useState(props.initialTempoRate);
   const [metronome, setMetronome] = useState(true);
   const [wait, setWait] = useState(false);
@@ -76,7 +83,7 @@ export function PracticeSession(props: Props) {
   const [duelLow, setDuelLow] = useState<number | null>(null);
 
   // A new exercise (a drill's settings changed) starts on the whole of it.
-  useEffect(() => setRange(trim), [trim[0], trim[1]]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setRange(opening()), [trim[0], trim[1]]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const users = useUsers();
   const userId = users.state === 'ready' ? users.current.id : null;

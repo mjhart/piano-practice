@@ -130,7 +130,7 @@ export function Results({ run, score, onPractice, onAgain, onRestore, onBack, ba
   );
 }
 
-const TAG_HEADINGS: Record<string, string> = {
+export const TAG_HEADINGS: Record<string, string> = {
   key: 'By key',
   chord: 'By chord',
   scale: 'By scale',

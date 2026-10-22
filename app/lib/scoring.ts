@@ -186,8 +186,16 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
 const ratio = (hits: number, misses: number, extras: number) =>
   hits + misses + extras ? hits / (hits + misses + extras) : null;
 
-/** Scores a stored run from its raw events. */
-export function scoreRun(song: SongModel, run: Run): RunScore {
+export type RunMatch = {
+  /** The expected notes, as expectedNotes gives them. */
+  notes: Note[];
+  matcher: Matcher;
+  /** Whether an unmatched note counts as missed: the run went far enough past it that it could no longer be hit. */
+  due: (note: Note) => boolean;
+};
+
+/** Replays a stored run's events through a Matcher. scoreRun tallies the result; statistics look at single notes. */
+export function matchRun(song: SongModel, run: Run): RunMatch {
   const notes = expectedNotes(song, run);
   const tolSec = (run.toleranceMs / 1000) * run.tempoRate;
   const rangeStart = song.measures[run.startMeasure].start;
@@ -195,6 +203,13 @@ export function scoreRun(song: SongModel, run: Run): RunScore {
   for (const e of run.events) {
     if (e.on) matcher.noteOn(songTimeOf(run, e.t), e.pitch);
   }
+  // A note the player could still have hit when the run stopped is not a miss.
+  return { notes, matcher, due: (n) => n.start <= run.reachedTime - tolSec };
+}
+
+/** Scores a stored run from its raw events. */
+export function scoreRun(song: SongModel, run: Run): RunScore {
+  const { notes, matcher, due } = matchRun(song, run);
 
   const tally = new Map<number, { hits: number; misses: number; extras: number; errors: number[] }>();
   for (let m = run.startMeasure; m <= run.endMeasure; m++) {
@@ -208,8 +223,7 @@ export function scoreRun(song: SongModel, run: Run): RunScore {
       t.hits++;
       t.errors.push(error);
       errors.push(error);
-    } else if (n.start <= run.reachedTime - tolSec) {
-      // A note the player could still have hit when the run stopped is not a miss.
+    } else if (due(n)) {
       t.misses++;
     }
   }

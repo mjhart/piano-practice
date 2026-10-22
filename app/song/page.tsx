@@ -21,7 +21,15 @@ export default function SongPage() {
 }
 
 function SongView() {
-  const id = useSearchParams().get('id') ?? '';
+  const params = useSearchParams();
+  const id = params.get('id') ?? '';
+  // A section to open on, as 1-based measure numbers: ?from=12&to=14.
+  const from = Number(params.get('from'));
+  const to = Number(params.get('to') ?? from);
+  const initialRange = useMemo<[number, number] | undefined>(
+    () => (from >= 1 && to >= 1 ? [from - 1, to - 1] : undefined),
+    [from, to],
+  );
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,6 +88,7 @@ function SongView() {
       model={model}
       source={source}
       trim={[settings.firstMeasure, settings.lastMeasure]}
+      initialRange={initialRange}
       initialTracks={settings.tracks}
       initialTempoRate={settings.tempoRate}
       tempo={{

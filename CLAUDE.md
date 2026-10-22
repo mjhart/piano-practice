@@ -29,6 +29,11 @@ Next.js 15 static export (no server). See README.md for what it does.
   `exercise.ts` are shared helpers. A drill can put an `annotation` on a note
   (the scales drill puts fingers from `fingering.ts`), drawn on it as it falls. Drills write at `REFERENCE_BPM`; the tempo
   control sets the rate.
+- `app/lib/stats.ts`: a player's statistics (totals, streaks, daily trend, keys,
+  progress by source, weak sections, drill tag totals, duel record), from
+  `analyzeRun`, which uses `matchRun` from scoring so it agrees with scores.
+  Shown by `app/stats/page.tsx`. A song link can open on a section with
+  `&from=12&to=14` (1-based measures).
 - `app/lib/store/`: `PracticeStore` is the only way to read or write practice
   data. `IndexedDbStore` is the one implementation, chosen in `index.ts`. A
   backend would be a second implementation of the same interface.

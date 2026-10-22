@@ -15,6 +15,20 @@ import { KEY_NAMES, diatonicChord, isWhite, numeral, parseNumerals } from '../ap
 import { defaultDuelLayout, duelLayouts, duelOutcome, duelRange, duelSplit } from '../app/lib/duel.ts';
 import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, scoreByTag, scoreRun } from '../app/lib/scoring.ts';
 import { upgradeRun } from '../app/lib/sources.ts';
+import {
+  addDays,
+  analyzeRun,
+  dailyTrend,
+  dayKey,
+  duelRecords,
+  keyboard,
+  progressBySource,
+  runMs,
+  streaks,
+  tagBreakdown,
+  totals,
+  weakSections,
+} from '../app/lib/stats.ts';
 import { defaultSettings, resolveSettings } from '../app/lib/settings.ts';
 import type { PlayedEvent, Run } from '../app/types.ts';
 
@@ -527,4 +541,128 @@ test('a duel is won on accuracy, then hits, then timing', () => {
   assert.deepEqual(duelOutcome(score(0.9, 9, 30), score(0.9, 10, 40)), { winner: 1, by: 'hits' });
   assert.deepEqual(duelOutcome(score(0.9, 9, 30), score(0.9, 9, 20)), { winner: 1, by: 'timing' });
   assert.deepEqual(duelOutcome(score(null, 0, null), score(null, 0, null)), { winner: null, by: null });
+});
+
+test('a run lasts its song time at its tempo plus its holds', () => {
+  assert.equal(runMs(run({})), 6500);
+  assert.equal(runMs(run({ tempoRate: 0.5, holds: [{ at: 0, ms: 700 }] })), 13700);
+});
+
+test('analyzeRun tallies each key: hits, misses and wrong presses', () => {
+  // As in the scoring test: C4 hit, a stray D4, E4 missed, G4 hit.
+  const stats = analyzeRun(song(), run({ events: [on(2020, 60), on(2300, 62), on(3970, 67)] }));
+  assert.equal(stats.score.accuracy, 0.5);
+  assert.deepEqual(
+    stats.keys.sort((a, b) => a.pitch - b.pitch),
+    [
+      { pitch: 60, hits: 1, misses: 0, wrong: 0 },
+      { pitch: 62, hits: 0, misses: 0, wrong: 1 },
+      { pitch: 64, hits: 0, misses: 1, wrong: 0 },
+      { pitch: 67, hits: 1, misses: 0, wrong: 0 },
+    ],
+  );
+  // Twice over, the keys add up.
+  assert.deepEqual(keyboard([stats, stats])[0], { pitch: 60, hits: 2, misses: 0, wrong: 0 });
+});
+
+test('streaks count days in a row, and today without practice yet keeps the streak alive', () => {
+  assert.equal(addDays('2026-02-28', 1), '2026-03-01');
+  assert.equal(addDays('2026-01-01', -1), '2025-12-31');
+  const days = ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-10', '2026-10-11'];
+  assert.deepEqual(streaks(days, '2026-10-12'), { current: 2, longest: 3 });
+  assert.deepEqual(streaks(days, '2026-10-11'), { current: 2, longest: 3 });
+  assert.deepEqual(streaks(days, '2026-10-13'), { current: 0, longest: 3 });
+  assert.deepEqual(streaks([], '2026-10-13'), { current: 0, longest: 0 });
+});
+
+const at = (day: number, hour = 12) => new Date(2026, 9, day, hour).getTime();
+
+test('totals and the daily trend weigh runs by notes, and leave wait mode out of timing', () => {
+  const model = song();
+  const all = [
+    analyzeRun(model, run({ startedAt: at(1, 9), events: [on(2020, 60), on(2300, 62), on(3970, 67)] })),
+    analyzeRun(model, run({ startedAt: at(1, 20), events: [on(2000, 60), on(2500, 64), on(4000, 67)] })),
+    analyzeRun(
+      model,
+      run({ startedAt: at(3), wait: true, holds: [{ at: 0, ms: 300 }], events: [on(2300, 60), on(2800, 64), on(4300, 67)] }),
+    ),
+  ];
+  const t = totals(all);
+  assert.deepEqual(round({ ...t, ms: undefined }), round({
+    runs: 3,
+    days: 2,
+    hits: 8,
+    misses: 1,
+    extras: 1,
+    accuracy: 0.8,
+    meanErrorMs: -2,
+    meanAbsErrorMs: 10,
+    waitPerNoteMs: 100,
+  }));
+  assert.deepEqual(
+    round(dailyTrend(all)),
+    [
+      { day: dayKey(at(1)), runs: 2, accuracy: 0.714, meanAbsErrorMs: 10 },
+      { day: dayKey(at(3)), runs: 1, accuracy: 1, meanAbsErrorMs: null },
+    ],
+  );
+});
+
+test('progress by source finds the best run, the change and the fastest clean run', () => {
+  const model = song();
+  // Song times and pitches, played at each run's own tempo.
+  const clean = [[0, 60], [0.5, 64], [2, 67]];
+  const sloppy = [[0, 60], [0.3, 62]];
+  const all = [sloppy, sloppy, clean, clean].map((notes, i) => {
+    const tempoRate = 1 + i / 10;
+    const events = notes.map(([time, pitch]) => on(((time + 2) / tempoRate) * 1000, pitch));
+    return analyzeRun(model, run({ id: `r${i}`, startedAt: at(i + 1), tempoRate, events }));
+  });
+  const [progress] = progressBySource(all);
+  assert.equal(progress.runs, 4);
+  assert.equal(progress.best, 1);
+  assert.equal(progress.fastestClean?.id, 'r3');
+  assert.equal(progress.lastPlayed, at(4));
+  // Sloppy runs hit C4 of three notes and press a stray D4: 25%. The first three average 50%, the last three 75%.
+  assert.equal(progress.change, 0.25);
+});
+
+test('weak sections join neighbouring measures that went badly lately', () => {
+  const model = song();
+  // Measure 1 is missed twice, then played well three times: only its last five plays count.
+  const played = [on(2000, 60), on(2500, 64), on(4000, 67)];
+  const first = [on(2000, 60), on(2500, 64)];
+  const all = [first, first, played, played, played].map((events) => analyzeRun(model, run({ events })));
+  assert.deepEqual(weakSections(all, [0, 1]), [{ from: 1, to: 1, accuracy: 0.6, notes: 5 }]);
+  assert.deepEqual(weakSections(all, [0, 0]), []);
+  // Two more good plays push both misses out.
+  const better = analyzeRun(model, run({ events: played }));
+  assert.deepEqual(weakSections([...all, better, better], [0, 1]), []);
+});
+
+test('the tag breakdown adds up every run of a drill, weakest first', () => {
+  const exercise = { ...song(), tags: [{ key: 'C' }, { key: 'G' }] };
+  const source = { kind: 'drill' as const, drillId: 'd', drillVersion: 1, config: {}, seed: 1, exercise };
+  const missG = analyzeRun(exercise, run({ source, events: [on(2000, 60), on(2500, 64)] }));
+  const all = analyzeRun(exercise, run({ source, events: [on(2000, 60), on(2500, 64), on(4000, 67)] }));
+  assert.deepEqual(tagBreakdown([missG, all]), [
+    {
+      tag: 'key',
+      values: [
+        { value: 'G', hits: 1, misses: 1, extras: 0, accuracy: 0.5 },
+        { value: 'C', hits: 4, misses: 0, extras: 0, accuracy: 1 },
+      ],
+    },
+  ]);
+});
+
+test('duel records count wins, losses and draws against each opponent', () => {
+  const model = song();
+  const side = (id: string, userId: string, opponentId: string, events: PlayedEvent[]) =>
+    analyzeRun(model, run({ userId, duel: { id, opponentId, side: 'low' }, events }));
+  const good = [on(2000, 60), on(2500, 64), on(4000, 67)];
+  const bad = [on(2000, 60)];
+  const mine = [side('a', 'me', 'sam', good), side('b', 'me', 'sam', bad), side('c', 'me', 'sam', good), side('d', 'me', 'kim', good)];
+  const theirs = [side('a', 'sam', 'me', bad), side('b', 'sam', 'me', good), side('c', 'sam', 'me', good)];
+  assert.deepEqual(duelRecords(mine, theirs), [{ opponentId: 'sam', wins: 1, losses: 1, draws: 1 }]);
 });
