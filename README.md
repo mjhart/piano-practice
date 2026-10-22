@@ -33,6 +33,17 @@ players. Pieces and their setup are shared, while each player has their own
 runs, history and measure colours. Practice recorded before players existed
 belongs to the first player, "Player 1".
 
+## Statistics
+
+"Stats" at the top of every page shows the current player's practice: time at
+the keys, practice days and streak, a calendar of the last 20 weeks, accuracy
+and timing by day, a keyboard coloured by how often each key's notes were hit
+(with the keys missed most and pressed by mistake), progress on each piece and
+drill, trouble spots in pieces with a button to practice just those measures,
+every drill run added up by key or chord, and the player's duel record. It
+covers the last 7 days, 30 days or all time, and like scores it is all worked
+out from the stored runs.
+
 ## Other commands
 
 ```

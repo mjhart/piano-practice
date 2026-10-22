@@ -48,6 +48,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               Piano Practice
             </Link>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <Link href="/stats" className="font-display text-sm tracking-wider uppercase hover:text-gold">
+                Stats
+              </Link>
               <UserPicker />
               <MidiStatus />
             </div>
