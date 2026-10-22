@@ -1,12 +1,13 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { defaultDuelLayout, duelLayouts, duelRange } from '../../lib/duel';
 import { getMetronomeOffset, setMetronomeOffset } from '../../lib/prefs';
 import { expectedNotes, scoreRun } from '../../lib/scoring';
 import { sourceKeyOf } from '../../lib/sources';
 import { store } from '../../lib/store';
-import { addUser, useUsers } from '../../lib/users';
+import { useUsers } from '../../lib/users';
 import type { Run, RunSource, SongModel, User } from '../../types';
 import { DuelResults } from './DuelResults';
 import { HeatStrip, heatColor } from './HeatStrip';
@@ -162,16 +163,6 @@ export function PracticeSession(props: Props) {
     if (picks[1 - side] === id) picks[1 - side] = picks[side];
     picks[side] = id;
     setDuelPicks(picks);
-  };
-  const addDuelPlayer = async () => {
-    const name = window.prompt('Name of the second player')?.trim();
-    if (!name || !userId) return;
-    try {
-      const user = await addUser(name, false);
-      setDuelPicks([userId, user.id]);
-    } catch {
-      setError('The player could not be added.');
-    }
   };
 
   if (users.state === 'error') return <p className="card border-ember text-ember">{users.message}</p>;
@@ -430,9 +421,9 @@ export function PracticeSession(props: Props) {
         {duel && !duelSetup && (
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span>A duel needs a second player.</span>
-            <button type="button" className="btn" onClick={() => void addDuelPlayer()}>
+            <Link href="/players" className="btn">
               Add a player
-            </button>
+            </Link>
           </div>
         )}
         {duel && duelSetup && (
