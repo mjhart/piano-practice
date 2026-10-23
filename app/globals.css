@@ -56,3 +56,65 @@ input[type='checkbox'] {
     @apply font-display leading-none tracking-tight break-words uppercase;
   }
 }
+
+/* The kiss shower (app/components/KissShower.tsx). */
+.kiss-float {
+  position: absolute;
+  bottom: -4rem;
+  opacity: 0;
+  animation: kiss-float 2000ms ease-out forwards;
+}
+
+.kiss-big {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  font-size: 8rem;
+  line-height: 1;
+  opacity: 0;
+  animation: kiss-pop 1600ms ease-out forwards;
+}
+
+@keyframes kiss-float {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(0) scale(0.6);
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--drift), -110vh) rotate(var(--tilt)) scale(1.1);
+  }
+}
+
+@keyframes kiss-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+  40% {
+    transform: translate(-50%, -50%) scale(0.95);
+  }
+  55% {
+    transform: translate(-50%, -50%) scale(1.05);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kiss-float {
+    display: none;
+  }
+}

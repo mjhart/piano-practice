@@ -14,6 +14,7 @@ import { drills } from '../app/lib/drills/registry.ts';
 import { KEY_NAMES, diatonicChord, isWhite, numeral, parseNumerals } from '../app/lib/drills/theory.ts';
 import { defaultDuelLayout, duelLayouts, duelOutcome, duelRange, duelSplit } from '../app/lib/duel.ts';
 import { DEFAULT_TOLERANCE_MS, Matcher, WaitGate, expectedNotes, scoreByTag, scoreRun } from '../app/lib/scoring.ts';
+import { earnsKiss, isWife } from '../app/lib/easterEgg.ts';
 import { upgradeRun } from '../app/lib/sources.ts';
 import {
   addDays,
@@ -705,4 +706,20 @@ test('duel records count wins, losses and draws against each opponent', () => {
   const mine = [side('a', 'me', 'sam', good), side('b', 'me', 'sam', bad), side('c', 'me', 'sam', good), side('d', 'me', 'kim', good)];
   const theirs = [side('a', 'sam', 'me', bad), side('b', 'sam', 'me', good), side('c', 'sam', 'me', good)];
   assert.deepEqual(duelRecords(mine, theirs), [{ opponentId: 'sam', wins: 1, losses: 1, draws: 1 }]);
+});
+
+test('a player named like a wife earns a kiss for finishing a run', () => {
+  assert.ok(isWife('My Wife'));
+  assert.ok(isWife('WIFEY'));
+  assert.ok(!isWife('Matt'));
+  const users = [
+    { id: 'w', name: 'Wifey', addedAt: 0 },
+    { id: 'm', name: 'Matt', addedAt: 0 },
+  ];
+  assert.ok(earnsKiss([run({ userId: 'w' })], users));
+  assert.ok(!earnsKiss([run({ userId: 'w', completed: false })], users));
+  assert.ok(!earnsKiss([run({ userId: 'm' })], users));
+  assert.ok(!earnsKiss([run({ userId: 'gone' })], users));
+  // In a duel, either side finishing is enough.
+  assert.ok(earnsKiss([run({ userId: 'm' }), run({ userId: 'w' })], users));
 });
