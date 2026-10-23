@@ -8,7 +8,7 @@ import { chordProgressions } from '../app/lib/drills/chordProgressions.ts';
 import { randomNotes } from '../app/lib/drills/randomNotes.ts';
 import { scales } from '../app/lib/drills/scales.ts';
 import { resolveConfig } from '../app/lib/drills/fields.ts';
-import { fingeredLine } from '../app/lib/drills/fingering.ts';
+import { fingeredArpeggio, fingeredLine } from '../app/lib/drills/fingering.ts';
 import { seededRng } from '../app/lib/drills/random.ts';
 import { drills } from '../app/lib/drills/registry.ts';
 import { KEY_NAMES, diatonicChord, isWhite, numeral, parseNumerals } from '../app/lib/drills/theory.ts';
@@ -509,6 +509,46 @@ test('chromatic scales keep the thumb on white keys and 3 on black', () => {
     fingeredLine(60, 1, chromatic, chromatic, 'up', hand).map((n) => n.finger).join('');
   assert.equal(run('right'), '1313123131312');
   assert.equal(run('left'), '1313213131321');
+});
+
+test('arpeggios are fingered the standard way in every major and minor key', () => {
+  const fingers = (key: string, steps: number[], hand: 'right' | 'left') =>
+    fingeredArpeggio((hand === 'right' ? 60 : 48) + KEY_NAMES.indexOf(key), 2, steps, 'up', hand)
+      .map((n) => n.finger)
+      .join('');
+  // Two octaves up from the root, right hand then left.
+  const major: Record<string, [string, string]> = {
+    C: ['1231235', '5421421'], G: ['1231235', '5421421'], F: ['1231235', '5421421'],
+    D: ['1231235', '5321321'], A: ['1231235', '5321321'], E: ['1231235', '5321321'], B: ['1231235', '5321321'],
+    Db: ['4124124', '2142142'], Ab: ['4124124', '2142142'], Eb: ['4124124', '2142142'], Bb: ['4124124', '3213213'],
+    'F#': ['1231235', '5421421'],
+  };
+  const minor: Record<string, [string, string]> = {
+    C: ['1231235', '5421421'], D: ['1231235', '5421421'], E: ['1231235', '5421421'], F: ['1231235', '5421421'],
+    G: ['1231235', '5421421'], A: ['1231235', '5421421'], B: ['1231235', '5421421'],
+    Db: ['4124124', '2132132'], 'F#': ['4124124', '2132132'], Ab: ['4124124', '2132132'], Bb: ['2312312', '3213213'],
+    Eb: ['1231235', '5421421'],
+  };
+  for (const [key, [right, left]] of Object.entries(major)) {
+    assert.equal(fingers(key, [0, 4, 7], 'right'), right, `${key} major right hand`);
+    assert.equal(fingers(key, [0, 4, 7], 'left'), left, `${key} major left hand`);
+  }
+  for (const [key, [right, left]] of Object.entries(minor)) {
+    assert.equal(fingers(key, [0, 3, 7], 'right'), right, `${key} minor right hand`);
+    assert.equal(fingers(key, [0, 3, 7], 'left'), left, `${key} minor left hand`);
+  }
+  // C major's inversions, and its sevenths.
+  assert.equal(fingers('C', [0, 3, 8], 'right') + ' ' + fingers('C', [0, 3, 8], 'left'), '1241245 5421421');
+  assert.equal(fingers('G', [0, 5, 9], 'right') + ' ' + fingers('G', [0, 5, 9], 'left'), '1241245 5321321');
+  assert.equal(fingers('C', [0, 4, 7, 10], 'right') + ' ' + fingers('C', [0, 4, 7, 10], 'left'), '123412345 543214321');
+});
+
+test('the arpeggios drill puts a finger on every note, turning at the top on the fifth finger', () => {
+  const config = resolveConfig(arpeggios, { keys: ['C'], chords: ['major'], octaves: 2, direction: 'up-down' });
+  const exercise = arpeggios.generate(config, seededRng(1));
+  const right = exercise.notes.filter((n) => n.track === 0).map((n) => n.annotation).join('');
+  assert.equal(right, '1231235321321');
+  assert.ok(exercise.notes.every((n) => n.annotation));
 });
 
 test('a duel puts the part twice on the keyboard, whole octaves apart without sharing a key', () => {
