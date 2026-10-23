@@ -112,3 +112,72 @@ export function fingeredLine(
     return { pitch, finger: pitch === end ? endFinger(steps, at) : at(pitch) };
   });
 }
+
+// Arpeggio fingerings, worked out the same way. Each octave repeats one hand
+// position: the right hand plays 1 2 3 or 1 2 4 up from the thumb (1 2 3 4 for
+// a seventh chord) and the left hand 3 2 1 or 4 2 1 up to it (4 3 2 1). The
+// thumb takes the lowest note when it is white, as in C, D and A major, and
+// otherwise a white key it crosses beside a black one, as B♭ major puts it on
+// D in the right hand and on F in the left. Only when every note is black does
+// the thumb go on one, and then on the lowest, as in C.
+
+/** How far across the keyboard a pitch is, in white keys, with a black key between its neighbours. */
+const keyPosition = (pitch: number) => 7 * Math.floor(pitch / 12) + [0, 0.5, 1, 1.5, 2, 3, 3.5, 4, 4.5, 5, 5.5, 6][pitch % 12];
+
+/**
+ * The finger for each note of a chord broken upwards from `bottom`, given as
+ * semitones up from it, as it repeats every octave.
+ */
+export function arpeggioFingers(bottom: number, steps: number[], hand: Hand): number[] {
+  const n = steps.length;
+  const pitch = (i: number) => bottom + steps[i % n] + 12 * Math.floor(i / n);
+  const white = steps.map((s) => isWhite(bottom + s));
+  let thumb = 0;
+  let bestCost = Infinity;
+  for (let t = 0; t < n; t++) {
+    // The note the thumb crosses from going up in the right hand, or to in the left.
+    const beside = hand === 'right' ? (t + n - 1) % n : (t + 1) % n;
+    const cost = (white[t] ? 0 : BLACK_THUMB) + (white[beside] ? 1 : 0) + (white[0] && t !== 0 ? 3 : 0);
+    if (cost < bestCost) {
+      bestCost = cost;
+      thumb = t;
+    }
+  }
+  const fingers = new Array<number>(n);
+  for (let k = 0; k < n; k++) fingers[(thumb + k) % n] = hand === 'right' ? k + 1 : k === 0 ? 1 : n + 1 - k;
+  if (n === 3) {
+    if (hand === 'right') {
+      // The third note takes 4 when it is further from the second than from
+      // the next thumb, as C major's first inversion goes 1 2 4; otherwise 3,
+      // and the thumb crosses the wider gap.
+      const third = thumb + 2;
+      fingers[third % n] = pitch(third) - pitch(third - 1) > pitch(third + 1) - pitch(third) ? 4 : 3;
+    } else {
+      // The note after the thumb takes 3 a fourth away, or a major third away
+      // on a black key, as D major goes 5 3 2 1; otherwise 4, as C major goes 5 4 2 1.
+      const next = thumb + 1;
+      fingers[next % n] = keyPosition(pitch(next)) - keyPosition(pitch(thumb)) >= 2.5 ? 3 : 4;
+    }
+  }
+  return fingers;
+}
+
+/**
+ * Pitches and fingers for an arpeggio, built as `line` builds it, the same
+ * steps up and down. The top note in the right hand and the bottom note in the
+ * left take 5 where the pattern would put the thumb.
+ */
+export function fingeredArpeggio(
+  bottom: number,
+  octaves: number,
+  steps: number[],
+  direction: string,
+  hand: Hand,
+): { pitch: number; finger: number }[] {
+  const fingers = arpeggioFingers(bottom, steps, hand);
+  const end = hand === 'right' ? bottom + 12 * octaves : bottom;
+  return line(bottom, octaves, steps, steps, direction).map((pitch) => {
+    const finger = fingers[steps.indexOf((pitch - bottom) % 12)];
+    return { pitch, finger: pitch === end && finger === 1 ? 5 : finger };
+  });
+}

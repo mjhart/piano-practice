@@ -1,6 +1,7 @@
-import { directionField, keyName, keysField, layLines, line, noteValueField, NOTE_VALUES, octavesField, orderField, orderKeys, placeRun } from './common.ts';
+import { directionField, keyName, keysField, layLines, noteValueField, NOTE_VALUES, octavesField, orderField, orderKeys, placeRun } from './common.ts';
 import type { BeatNote } from './exercise.ts';
 import { buildExercise } from './exercise.ts';
+import { fingeredArpeggio } from './fingering.ts';
 import { tonicOf } from './theory.ts';
 import type { DrillDefinition } from './types';
 
@@ -41,7 +42,7 @@ const preset = (config: Partial<Config>): Config => ({
 export const arpeggios: DrillDefinition<Config> = {
   id: 'arpeggios',
   name: 'Arpeggios',
-  description: 'Chords broken across octaves, from the root or any inversion, hands together an octave apart.',
+  description: 'Chords broken across octaves, from the root or any inversion, hands together an octave apart, with the fingering on each note.',
   version: 1,
   fields: [
     keysField('keys'),
@@ -99,10 +100,16 @@ export const arpeggios: DrillDefinition<Config> = {
           const first = chord.tones[inversion];
           const steps = [...chord.tones.slice(inversion), ...chord.tones.slice(0, inversion).map((t) => t + 12)].map((t) => t - first);
           const right = placeRun((tonicOf(key) + first) % 12, 12 * config.octaves, 60, 108);
-          const lines = [
-            { part: 0, pitches: line(right, config.octaves, steps, steps, config.direction) },
-            { part: 1, pitches: line(right - 12, config.octaves, steps, steps, config.direction) },
+          const hands = [
+            { part: 0, run: fingeredArpeggio(right, config.octaves, steps, config.direction, 'right') },
+            { part: 1, run: fingeredArpeggio(right - 12, config.octaves, steps, config.direction, 'left') },
           ];
+          // Each note shows the finger to play it with.
+          const lines = hands.map(({ part, run }) => ({
+            part,
+            pitches: run.map((n) => n.pitch),
+            annotations: run.map((n) => String(n.finger)),
+          }));
           const measures = layLines(notes, lines, tags.length * BEATS, value, BEATS);
           const name = `${keyName(key)} ${chord.label}`;
           for (let i = 0; i < measures; i++) tags.push({ chord: name, inversion: INVERSIONS[inversion] });
