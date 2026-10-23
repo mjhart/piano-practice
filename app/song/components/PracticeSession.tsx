@@ -2,8 +2,10 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { KissShower } from '../../components/KissShower';
 import { defaultDuelLayout, duelLayouts, duelRange } from '../../lib/duel';
 import { getMetronomeOffset, setMetronomeOffset } from '../../lib/prefs';
+import { earnsKiss } from '../../lib/easterEgg';
 import { expectedNotes, scoreRun } from '../../lib/scoring';
 import { sourceKeyOf } from '../../lib/sources';
 import { store } from '../../lib/store';
@@ -89,6 +91,10 @@ export function PracticeSession(props: Props) {
   const userId = users.state === 'ready' ? users.current.id : null;
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
+  const usersRef = useRef(users);
+  usersRef.current = users;
+  const [kiss, setKiss] = useState(false);
+  const endKiss = useCallback(() => setKiss(false), []);
 
   // Each player sees only their own history.
   useEffect(() => {
@@ -124,6 +130,8 @@ export function PracticeSession(props: Props) {
   }, []);
   const onEnd = useCallback((recorded: Run[]) => {
     const run = recorded.at(-1);
+    const users = usersRef.current;
+    if (users.state === 'ready' && earnsKiss(recorded, users.list)) setKiss(true);
     if (run?.duel) setMode({ kind: 'duel', runs: [recorded[0], run] });
     else setMode(run ? { kind: 'results', run, ...(recorded.length > 1 && { passes: recorded }) } : { kind: 'setup' });
   }, []);
@@ -186,6 +194,7 @@ export function PracticeSession(props: Props) {
     const replay = sameExercise(low) && players[0] && players[1];
     return (
       <div className="space-y-6">
+        {kiss && <KissShower onDone={endKiss} />}
         {error && <p className="card border-ember text-sm text-ember">{error}</p>}
         <DuelResults
           key={low.id}
@@ -226,6 +235,7 @@ export function PracticeSession(props: Props) {
     const same = sameExercise(run);
     return (
       <div className="space-y-6">
+        {kiss && <KissShower onDone={endKiss} />}
         {error && <p className="card border-ember text-sm text-ember">{error}</p>}
         {passes && (
           <section className="card space-y-3">
